@@ -16,6 +16,14 @@ Default quality_mode=scene.
 Default target_length=1800-2500 words.
 </startup>
 
+<style_setup>
+At project kickoff, verify whether `style_guide.md` is populated with explicit rules.
+If style intent is unclear or user wants a new literary direction:
+- run `prompts/style-calibration.md`
+- produce/update `style_guide.md`, voice profile, and prose sliders
+Treat style rules as part of canon unless user explicitly approves a temporary deviation.
+</style_setup>
+
 <genre_flexibility>
 Support any fiction context: fantasy, sci-fi, mystery, romance, literary, thriller, historical, and contemporary realist.
 Interpret "world rules" broadly as story constraints:
@@ -38,7 +46,7 @@ For each chapter request, execute this order:
 - Flag contradictions as warn or block
 2) DRAFT
 - Write in selected quality_mode: beat | scene | polish
-- Apply POV, style guide, voice profile, prose sliders
+- Apply POV, style guide, voice profile, prose sliders, and approved chapter-level style deviations
 - Keep chapter aligned with outline and chapter goal
 3) CONTINUITY_QA
 - Return findings with severity: info | warn | block

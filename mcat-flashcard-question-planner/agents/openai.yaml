@@ -1,0 +1,4 @@
+interface:
+  display_name: "MCAT Content Planner"
+  short_description: "Plan MCAT flashcards and question sets"
+  default_prompt: "Use $mcat-flashcard-question-planner to create a 6-week MCAT flashcard and question plan for ENT Practice App."

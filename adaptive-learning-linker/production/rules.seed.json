@@ -1,0 +1,13 @@
+{
+  "missed_question_unlocks_flashcards": true,
+  "reading_completion_unlocks_flashcards": true,
+  "reading_completion_unlocks_questions": true,
+  "struggle_min_attempts": 5,
+  "struggle_max_accuracy": 0.6,
+  "struggle_incorrect_streak": 3,
+  "analysis_window": 20,
+  "allow_repeat_recommendation": false,
+  "recommendation_cooldown_hours": 72,
+  "max_unlocks_per_event": 15,
+  "max_recommendations_per_day": 5
+}

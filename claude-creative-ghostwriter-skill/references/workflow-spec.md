@@ -5,6 +5,7 @@
 1. Detect available canon files.
 2. Ask for worldbuilding mode selection.
 3. If no world files exist, launch worldbuilding interview.
+4. If style rules are missing or vague, run style calibration and update `style_guide.md`.
 
 ## Modes
 
@@ -24,7 +25,7 @@
 
 1. Plan: five-beat map with canon anchors.
 2. Draft: produce prose based on requested quality mode.
-3. QA: output severity-scored continuity report.
+3. QA: output severity-scored continuity report, including style drift checks.
 4. Revise: incorporate approved fixes and finalize text.
 
 ## Quality Modes

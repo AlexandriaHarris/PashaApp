@@ -20,6 +20,7 @@ Audit chapter draft against canonical files and approved changelog entries.
 - geography, access, jurisdiction, ownership, control
 5. Theme and style consistency
 - tone, motif usage, narration distance, register
+- sentence architecture, diction, rhythm, figurative density, dialogue behavior versus `style_guide.md`
 </audit_axes>
 
 <output_format>
@@ -34,6 +35,7 @@ For each warn/block finding include:
 On warn or block, ask user whether to preserve canon or approve override.
 If override is approved, append structured entry to `canon_changelog.md`.
 Never silently retcon source canon files.
+For style drift findings, ask whether drift is intentional for this chapter or should be revised to baseline style contract.
 </decision_policy>
 
 <response_footer>

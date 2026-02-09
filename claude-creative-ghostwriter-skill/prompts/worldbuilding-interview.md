@@ -50,6 +50,15 @@ Use this interview to gather canonical world facts before writing chapters.
 - Elements to reveal slowly
 - Elements intentionally left unknown
 
+10. Literary style calibration
+- Desired reader experience (for example: intimate, austere, lush, ironic, propulsive)
+- Voice and diction targets
+- Sentence architecture preferences
+- Dialogue-to-description balance
+- Figurative language density and motif handling
+- Prohibited style habits and cliches
+- Optional sample passages and what to emulate or avoid
+
 ## Completion Criteria
 
 Conclude interview only after each topic has either:

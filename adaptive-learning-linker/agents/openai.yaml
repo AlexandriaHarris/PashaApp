@@ -1,0 +1,4 @@
+interface:
+  display_name: "Adaptive Learning Linker"
+  short_description: "Adaptive unlocks for readings, cards, and questions"
+  default_prompt: "Use $adaptive-learning-linker to map learner outcomes to unlock and recommendation actions."

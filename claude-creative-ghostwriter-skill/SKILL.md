@@ -82,7 +82,14 @@ If files are missing, scaffold from templates in `templates/world/`.
 
 ## Style System
 
-Use `templates/voice-profile-template.md` and `templates/prose-sliders-template.md` whenever style is missing or vague. Ask user to set values, otherwise use defaults in the templates.
+1. At project kickoff, confirm whether a style contract exists in `style_guide.md`.
+2. If style is missing, vague, or intentionally changing, run `prompts/style-calibration.md`.
+3. Capture user intent in:
+- `templates/literary-style-brief-template.md`
+- `templates/voice-profile-template.md`
+- `templates/prose-sliders-template.md`
+4. Update `style_guide.md` with explicit, testable style rules.
+5. During chapter runs, treat style drift as a continuity risk and flag it in continuity QA.
 
 ## Guardrails
 

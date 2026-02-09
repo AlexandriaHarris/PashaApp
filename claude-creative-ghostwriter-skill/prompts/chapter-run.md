@@ -11,6 +11,8 @@ Use `templates/chapter-request-template.md`:
 - point_of_view
 - quality_mode
 - target_length
+- style_intent_for_chapter
+- allowed_style_deviation
 </inputs>
 
 <phase_plan>
@@ -19,18 +21,20 @@ Use `templates/chapter-request-template.md`:
 3. Validate against story constraints relevant to the genre/context:
 - speculative rules when present
 - social/legal/institutional realism constraints when applicable
-4. Flag contradictions as warn or block.
+4. Validate style plan against `style_guide.md` and chapter-level style intent.
+5. Flag contradictions as warn or block.
 </phase_plan>
 
 <phase_draft>
 1. Draft to target length and quality mode.
 2. Honor style guide, voice profile, and prose sliders.
-3. Preserve chapter goal, POV, and approved canon decisions.
+3. If `allowed_style_deviation` is empty, enforce style guide strictly.
+4. Preserve chapter goal, POV, and approved canon decisions.
 </phase_draft>
 
 <phase_continuity_qa>
 1. Run continuity-check prompt.
-2. Return findings with severity and candidate resolutions.
+2. Return findings with severity and candidate resolutions, including style drift findings.
 3. Pause for user decision on unresolved warn/block findings.
 </phase_continuity_qa>
 
