@@ -192,13 +192,36 @@ function countArrayValues(arrayValues) {
   return counts;
 }
 
-function sortFacetEntries(counts) {
-  return Object.entries(counts || {}).sort((left, right) => {
-    if (right[1] !== left[1]) {
-      return right[1] - left[1];
-    }
-    return left[0].localeCompare(right[0]);
-  });
+function sortFacetEntries(counts, facetKey) {
+  const entries = Object.entries(counts || {});
+
+  if (facetKey === "chapter") {
+    return entries.sort((left, right) => {
+      const leftMatch = left[0].match(/^Chapter\\s+(\\d+)\\s*:/i);
+      const rightMatch = right[0].match(/^Chapter\\s+(\\d+)\\s*:/i);
+      const leftNumber = leftMatch ? Number(leftMatch[1]) : null;
+      const rightNumber = rightMatch ? Number(rightMatch[1]) : null;
+
+      if (leftNumber !== null && rightNumber !== null && leftNumber !== rightNumber) {
+        return leftNumber - rightNumber;
+      }
+      if (leftNumber !== null && rightNumber === null) {
+        return -1;
+      }
+      if (leftNumber === null && rightNumber !== null) {
+        return 1;
+      }
+
+      return left[0].localeCompare(right[0], undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+    });
+  }
+
+  return entries.sort((left, right) =>
+    left[0].localeCompare(right[0], undefined, { sensitivity: "base", numeric: true })
+  );
 }
 
 function normalizeFactShape(rawFact) {
@@ -253,9 +276,9 @@ function computeFacetCountsFromFacts(facts) {
   };
 }
 
-function renderFacetList(container, counts, defaultChecked) {
+function renderFacetList(container, counts, defaultChecked, facetKey = "") {
   container.innerHTML = "";
-  const entries = sortFacetEntries(counts);
+  const entries = sortFacetEntries(counts, facetKey);
 
   if (!entries.length) {
     const empty = document.createElement("p");
@@ -363,7 +386,7 @@ function refreshSectionFacet(preserveSelection) {
     );
   }
 
-  renderFacetList(els.sectionList, sectionCounts, true);
+  renderFacetList(els.sectionList, sectionCounts, true, "section");
 
   if (selectedSet) {
     els.sectionList.querySelectorAll("input[type='checkbox']").forEach((input) => {
@@ -898,7 +921,7 @@ function init() {
   els.bankMeta.textContent = `${state.facts.length} facts across ${chapterCount} chapters (${colonCount} keyed + ${proseCount} prose).`;
 
   Object.entries(facetConfigs).forEach(([key, config]) => {
-    renderFacetList(config.container, state.facetCounts[key] || {}, config.defaultChecked);
+    renderFacetList(config.container, state.facetCounts[key] || {}, config.defaultChecked, key);
   });
 
   refreshSectionFacet(false);
