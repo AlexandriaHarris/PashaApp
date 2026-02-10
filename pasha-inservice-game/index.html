@@ -28,7 +28,8 @@
           <label class="field">
             <span>Question Mode</span>
             <select id="modeSelect">
-              <option value="mixed">Mixed</option>
+              <option value="cloze" selected>Cloze (Recommended)</option>
+              <option value="mixed">Mixed (Legacy)</option>
               <option value="term-to-definition">Term to Definition</option>
               <option value="definition-to-term">Definition to Term</option>
             </select>
@@ -47,6 +48,11 @@
           <label class="field checkbox-field">
             <input id="timedToggle" type="checkbox" />
             <span>Timed Mode (25 seconds per question)</span>
+          </label>
+
+          <label class="field checkbox-field">
+            <input id="includeProseToggle" type="checkbox" />
+            <span>Include Prose-Derived Facts (Noisier)</span>
           </label>
         </div>
 

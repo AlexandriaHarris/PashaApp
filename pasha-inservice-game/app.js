@@ -15,6 +15,7 @@ const state = {
   timeLeft: 25,
   answerLocked: false,
   currentOpenEvidenceQuery: "",
+  choicePools: {},
 };
 
 const els = {
@@ -26,6 +27,7 @@ const els = {
   modeSelect: document.getElementById("modeSelect"),
   countSelect: document.getElementById("countSelect"),
   timedToggle: document.getElementById("timedToggle"),
+  includeProseToggle: document.getElementById("includeProseToggle"),
   keywordFilter: document.getElementById("keywordFilter"),
   topicList: document.getElementById("topicList"),
   chapterList: document.getElementById("chapterList"),
@@ -132,8 +134,8 @@ function buildOpenEvidenceQuery(question) {
     lines.push(`Key term: ${question.fact.term}`);
   } else if (question.mode === "definition-to-term") {
     lines.push(`Clinical stem: ${question.fact.definition}`);
-  } else if (question.mode === "prose-statement") {
-    lines.push(`Statement focus: ${question.fact.term}`);
+  } else if (question.mode === "cloze-typed" || question.mode === "cloze-term") {
+    lines.push(`Cloze stem: ${question.detail}`);
   }
 
   lines.push("Choices:");
@@ -520,51 +522,304 @@ function startTimer() {
   }, 1000);
 }
 
-function buildQuestion(fact, mode) {
-  if (fact.sourceType === "prose") {
-    const preferred = state.activeFacts.filter(
-      (other) =>
-        other.id !== fact.id && other.sourceType === "prose" && other.topic === fact.topic
-    );
-    const fallbackProse = state.activeFacts.filter(
-      (other) =>
-        other.id !== fact.id && other.sourceType === "prose" && other.topic !== fact.topic
-    );
-    const fallbackAny = state.activeFacts.filter(
-      (other) => other.id !== fact.id && other.sourceType !== "prose"
-    );
-    const pool = shuffle([...preferred, ...fallbackProse, ...fallbackAny]);
+function isPlayableFact(fact) {
+  if (!fact || !fact.term || !fact.definition) {
+    return false;
+  }
 
-    const options = [{ value: fact.definition, correct: true }];
-    const used = new Set([normalizeChoice(fact.definition)]);
+  const term = fact.term.trim();
+  const definition = fact.definition.trim();
+  if (term.length < 2 || term.length > 110) {
+    return false;
+  }
+  if (definition.length < 12 || definition.length > 420) {
+    return false;
+  }
+  if (!/[A-Za-z]/.test(term) || !/[A-Za-z]/.test(definition)) {
+    return false;
+  }
+  if (/^\d+(?:[-–]\d+)?$/.test(term)) {
+    return false;
+  }
+  if ((term.match(/[,;:()]/g) || []).length >= 4) {
+    return false;
+  }
+  if (/\.\s*\.\s*\./.test(term) || /\.\s*\.\s*\./.test(definition)) {
+    return false;
+  }
+  return true;
+}
 
-    for (const candidate of pool) {
-      const value = candidate.definition;
-      if (!value || value.length < 16) {
-        continue;
+function buildPeerPool(fact) {
+  const sameSection = state.activeFacts.filter(
+    (other) => other.id !== fact.id && other.topic === fact.topic && other.section === fact.section
+  );
+  const sameTopic = state.activeFacts.filter(
+    (other) =>
+      other.id !== fact.id &&
+      other.topic === fact.topic &&
+      !(other.section === fact.section && other.topic === fact.topic)
+  );
+  const sameChapter = state.activeFacts.filter(
+    (other) =>
+      other.id !== fact.id &&
+      other.chapter === fact.chapter &&
+      other.topic !== fact.topic
+  );
+  const everythingElse = state.activeFacts.filter(
+    (other) => other.id !== fact.id && other.chapter !== fact.chapter
+  );
+
+  return shuffle([...sameSection, ...sameTopic, ...sameChapter, ...everythingElse]);
+}
+
+function normalizeTokenValue(value) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function findTypedTokens(text) {
+  if (!text) {
+    return [];
+  }
+
+  const patterns = [
+    { type: "percentage", regex: /\b\d+(?:\.\d+)?(?:\s*[–-]\s*\d+(?:\.\d+)?)?\s*%/g },
+    { type: "cranial-nerve", regex: /\bCN\s*[IVX]{1,4}\b/gi },
+    {
+      type: "stage",
+      regex: /\b(?:T[0-4](?:[a-c])?|N[0-3](?:[a-c])?|M[0-1]|G[1-4]|Stage\s*[IVX]+|Type\s*\d+)\b/gi,
+    },
+    {
+      type: "gene-marker",
+      regex: /\b(?:p16|PD-L1|HMB-45|MITF|MART-1|BRAF|RET|NTRK|PTEN|EGFR|VEGF|CD\d{1,3}|Ig[A-Z]|IL-\d+|TNF-?[A-Za-z0-9]+|[A-Z]{2,6}\d{0,2})\b/g,
+    },
+    {
+      type: "measurement",
+      regex: /\b\d+(?:\.\d+)?\s?(?:mm|cm|mL|mg|g|dB|Hz|kHz|years?|weeks?|months?|days?|hours?)\b/gi,
+    },
+    { type: "count", regex: /\b\d+\b/g },
+  ];
+
+  const tokens = [];
+  const occupiedRanges = [];
+
+  patterns.forEach(({ type, regex }) => {
+    regex.lastIndex = 0;
+    let match = regex.exec(text);
+    while (match) {
+      const value = normalizeTokenValue(match[0]);
+      const start = match.index;
+      const end = start + match[0].length;
+
+      const overlaps = occupiedRanges.some(
+        (range) => start < range.end && end > range.start
+      );
+      if (!overlaps && value.length >= 2) {
+        tokens.push({ type, value, start, end });
+        occupiedRanges.push({ start, end });
       }
-      const normalized = normalizeChoice(value);
+
+      match = regex.exec(text);
+    }
+  });
+
+  tokens.sort((left, right) => left.start - right.start);
+  return tokens;
+}
+
+function buildChoicePools(facts) {
+  const pools = {
+    percentage: new Set(),
+    "cranial-nerve": new Set(),
+    stage: new Set(),
+    "gene-marker": new Set(),
+    measurement: new Set(),
+    count: new Set(),
+  };
+
+  facts.forEach((fact) => {
+    findTypedTokens(`${fact.term} ${fact.definition}`).forEach((token) => {
+      if (pools[token.type]) {
+        pools[token.type].add(token.value);
+      }
+    });
+  });
+
+  return pools;
+}
+
+function pickTypedDistractors(type, correctValue, neededCount = 3) {
+  const sourcePool = Array.from(state.choicePools[type] || []);
+  const normalizedCorrect = normalizeChoice(correctValue);
+  const candidates = sourcePool.filter(
+    (value) => normalizeChoice(value) !== normalizedCorrect
+  );
+  return shuffle(candidates).slice(0, neededCount);
+}
+
+function formatTypeLabel(type) {
+  const labelMap = {
+    percentage: "percentage",
+    "cranial-nerve": "cranial nerve",
+    stage: "stage/grade",
+    "gene-marker": "gene/marker",
+    measurement: "measurement",
+    count: "number",
+  };
+  return labelMap[type] || "value";
+}
+
+function replaceRangeWithBlank(text, start, end) {
+  return `${text.slice(0, start)}_____${text.slice(end)}`;
+}
+
+function buildTypedClozeQuestion(fact) {
+  const anchors = findTypedTokens(fact.definition).filter((token) => token.type !== "count");
+  for (const anchor of anchors) {
+    const distractors = pickTypedDistractors(anchor.type, anchor.value, 3);
+    if (distractors.length < 3) {
+      continue;
+    }
+
+    const clozeDefinition = replaceRangeWithBlank(fact.definition, anchor.start, anchor.end);
+    const options = shuffle([
+      { value: anchor.value, correct: true },
+      ...distractors.map((value) => ({ value, correct: false })),
+    ]);
+
+    return {
+      fact,
+      mode: "cloze-typed",
+      prompt: `Fill in the blank for "${fact.term}".`,
+      detail: `${clozeDefinition}\n\nPick the best ${formatTypeLabel(anchor.type)}.`,
+      options,
+    };
+  }
+
+  return null;
+}
+
+function buildTermClozeQuestion(fact) {
+  const correctTerm = fact.term.trim();
+  if (!correctTerm || correctTerm.length < 2) {
+    return null;
+  }
+
+  const stopWords = new Set([
+    "of",
+    "the",
+    "and",
+    "in",
+    "to",
+    "for",
+    "with",
+    "without",
+    "by",
+    "on",
+    "at",
+    "from",
+  ]);
+
+  const getHeadWord = (termValue) => {
+    const tokens = termValue
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((token) => !stopWords.has(token));
+    return tokens.length ? tokens[tokens.length - 1] : "";
+  };
+
+  const isGoodTermForCloze = (termValue) => {
+    const cleaned = termValue.trim();
+    if (cleaned.length < 2 || cleaned.length > 70) {
+      return false;
+    }
+    const words = cleaned.split(/\s+/);
+    if (words.length > 8) {
+      return false;
+    }
+    if (/\b(is|are|was|were|may|can|occurs?|results?|causes?)\b/i.test(cleaned)) {
+      return false;
+    }
+    if ((cleaned.match(/[,;:()]/g) || []).length >= 2) {
+      return false;
+    }
+    return /^[A-Za-z0-9][A-Za-z0-9'()/\s.-]*$/.test(cleaned);
+  };
+
+  if (!isGoodTermForCloze(correctTerm)) {
+    return null;
+  }
+
+  const correctHeadWord = getHeadWord(correctTerm);
+  const peerPool = buildPeerPool(fact);
+  const options = [{ value: correctTerm, correct: true }];
+  const used = new Set([normalizeChoice(correctTerm)]);
+  const termWordCount = correctTerm.split(/\s+/).length;
+  const strictPool = [];
+  const relaxedPool = [];
+
+  for (const peer of peerPool) {
+    const candidate = (peer.term || "").trim();
+    if (!isGoodTermForCloze(candidate)) {
+      continue;
+    }
+
+    const normalized = normalizeChoice(candidate);
+    if (used.has(normalized)) {
+      continue;
+    }
+
+    const candidateWords = candidate.split(/\s+/).length;
+    if (Math.abs(candidateWords - termWordCount) > 4) {
+      continue;
+    }
+    if (Math.abs(candidate.length - correctTerm.length) > 35) {
+      continue;
+    }
+
+    const candidateHeadWord = getHeadWord(candidate);
+    if (correctHeadWord && candidateHeadWord && candidateHeadWord === correctHeadWord) {
+      strictPool.push(candidate);
+    } else {
+      relaxedPool.push(candidate);
+    }
+  }
+
+  for (const pool of [strictPool, relaxedPool]) {
+    for (const candidate of pool) {
+      const normalized = normalizeChoice(candidate);
       if (used.has(normalized)) {
         continue;
       }
-      options.push({ value, correct: false });
+      options.push({ value: candidate, correct: false });
       used.add(normalized);
       if (options.length === 4) {
         break;
       }
     }
-
-    if (options.length < 4) {
-      return null;
+    if (options.length === 4) {
+      break;
     }
+  }
 
-    return {
-      fact,
-      mode: "prose-statement",
-      prompt: "Which statement is most accurate?",
-      detail: fact.term ? `Focus: ${trimForDisplay(fact.term, 140)}` : "Choose one statement.",
-      options: shuffle(options),
-    };
+  if (options.length < 4) {
+    return null;
+  }
+
+  return {
+    fact,
+    mode: "cloze-term",
+    prompt: "Fill in the blank term for this fact.",
+    detail: `_____ : ${fact.definition}`,
+    options: shuffle(options),
+  };
+}
+
+function buildQuestion(fact, mode) {
+  if (mode === "cloze") {
+    return buildTypedClozeQuestion(fact) || buildTermClozeQuestion(fact);
   }
 
   const correctValue = mode === "term-to-definition" ? fact.definition : fact.term;
@@ -573,13 +828,7 @@ function buildQuestion(fact, mode) {
       ? (otherFact) => otherFact.definition
       : (otherFact) => otherFact.term;
 
-  const preferred = state.activeFacts.filter(
-    (other) => other.id !== fact.id && other.topic === fact.topic
-  );
-  const fallback = state.activeFacts.filter(
-    (other) => other.id !== fact.id && other.topic !== fact.topic
-  );
-  const pool = shuffle([...preferred, ...fallback]);
+  const pool = buildPeerPool(fact);
 
   const options = [
     {
@@ -654,12 +903,17 @@ function buildQuestionWithFallback(baseFact, mode) {
 function renderQuestion() {
   state.answerLocked = false;
   const fact = state.roundFacts[state.index];
-  const selectedMode =
-    els.modeSelect.value === "mixed"
-      ? Math.random() > 0.5
-        ? "term-to-definition"
-        : "definition-to-term"
-      : els.modeSelect.value;
+  let selectedMode = els.modeSelect.value;
+  if (selectedMode === "mixed") {
+    const roll = Math.random();
+    if (roll < 0.55) {
+      selectedMode = "cloze";
+    } else if (roll < 0.78) {
+      selectedMode = "term-to-definition";
+    } else {
+      selectedMode = "definition-to-term";
+    }
+  }
 
   const question = buildQuestionWithFallback(fact, selectedMode);
   if (!question) {
@@ -785,11 +1039,14 @@ function renderMissed() {
     const answerLabel =
       miss.mode === "term-to-definition"
         ? "Correct Definition"
-        : miss.mode === "prose-statement"
-        ? "Correct Statement"
+        : miss.mode === "cloze-typed"
+        ? "Correct Value"
+        : miss.mode === "cloze-term"
+        ? "Correct Term"
         : "Correct Term";
-    const termLabel = miss.mode === "prose-statement" ? "Statement Focus" : "Term";
-    const definitionLabel = miss.mode === "prose-statement" ? "Source Statement" : "Definition";
+    const termLabel = miss.mode === "cloze-typed" ? "Fact Term" : "Term";
+    const definitionLabel =
+      miss.mode === "cloze-typed" || miss.mode === "cloze-term" ? "Cloze Stem" : "Definition";
     addLine(card, "Chapter", miss.chapter || "");
     addLine(card, "Topic", miss.topic);
     addLine(card, termLabel, miss.term);
@@ -817,12 +1074,16 @@ function startRound() {
     return;
   }
 
-  state.activeFacts = filtered.facts;
+  const includeProse = Boolean(els.includeProseToggle.checked);
+  state.activeFacts = filtered.facts.filter(
+    (fact) => isPlayableFact(fact) && (includeProse || fact.sourceType !== "prose")
+  );
   if (state.activeFacts.length < 4) {
     els.setupError.textContent =
-      "Need at least 4 facts after filtering to build multiple-choice questions.";
+      "Need at least 4 clean facts after filtering to build multiple-choice questions.";
     return;
   }
+  state.choicePools = buildChoicePools(state.activeFacts);
 
   const requestedCount = Number(els.countSelect.value);
   const roundSize = Math.min(requestedCount, state.activeFacts.length);
@@ -860,12 +1121,10 @@ function downloadMissedFacts() {
     lines.push(`Chapter: ${miss.chapter || ""}`);
     lines.push(`Topic: ${miss.topic}`);
     lines.push(
-      `${miss.mode === "prose-statement" ? "Statement Focus" : "Term"}: ${miss.term}`
+      `${miss.mode === "cloze-typed" ? "Fact Term" : "Term"}: ${miss.term}`
     );
     lines.push(
-      `${miss.mode === "prose-statement" ? "Source Statement" : "Definition"}: ${
-        miss.definition
-      }`
+      `${miss.mode === "cloze-typed" || miss.mode === "cloze-term" ? "Cloze Stem" : "Definition"}: ${miss.definition}`
     );
     lines.push(`Your Answer: ${miss.selected}`);
     lines.push(`Correct: ${miss.correct}`);
