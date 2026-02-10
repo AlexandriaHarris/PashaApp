@@ -270,6 +270,20 @@ function maybeUndoubleWord(word) {
   return out;
 }
 
+function normalizeOcrDoubledSegments(text) {
+  return String(text).replace(/[A-Za-z]{6,}/g, (segment) => maybeUndoubleWord(segment));
+}
+
+function stripShorthandMarkers(text) {
+  return String(text)
+    .replace(/\b(?:DDxx|RRxx|DDx|RRx)\b/gi, "")
+    .replace(/\b(?:DD|RR)\b\s*[:\-]/gi, "")
+    .replace(/\(\s*(?:DD|RR)[^)]+\)/gi, "")
+    .replace(/\s*;\s*;\s*/g, "; ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function normalizeLine(rawLine) {
   const normalized = rawLine
     .replace(/\u00A0/g, " ")
@@ -278,9 +292,9 @@ function normalizeLine(rawLine) {
     .replace(/\t/g, " ")
     .trim();
 
-  const undoubled = normalized
+  const undoubled = normalizeOcrDoubledSegments(stripShorthandMarkers(normalized))
     .split(/\s+/)
-    .map(maybeUndoubleWord)
+    .map((word) => normalizeOcrDoubledSegments(maybeUndoubleWord(word)))
     .join(" ");
 
   return undoubled.replace(/\s+/g, " ").trim();
@@ -294,7 +308,7 @@ function stripListPrefix(line) {
 }
 
 function cleanSegment(text) {
-  return text
+  return stripShorthandMarkers(text)
     .replace(/^[.,;:)\]]+/, "")
     .replace(/[.,;:([\-]+$/, "")
     .replace(/\s+\.+$/, "")

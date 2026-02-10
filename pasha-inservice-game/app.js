@@ -114,6 +114,38 @@ function trimForDisplay(text, maxLength = 210) {
   return `${text.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
+function maybeUndoubleWord(word) {
+  if (word.length < 6 || word.length % 2 !== 0) {
+    return word;
+  }
+
+  for (let index = 0; index < word.length; index += 2) {
+    if (word[index].toLowerCase() !== word[index + 1].toLowerCase()) {
+      return word;
+    }
+  }
+
+  let out = "";
+  for (let index = 0; index < word.length; index += 2) {
+    out += word[index];
+  }
+  return out;
+}
+
+function normalizeOcrDoubledSegments(text) {
+  return String(text || "").replace(/[A-Za-z]{6,}/g, (segment) => maybeUndoubleWord(segment));
+}
+
+function stripShorthandMarkers(text) {
+  return String(text || "")
+    .replace(/\b(?:DDxx|RRxx|DDx|RRx)\b/gi, "")
+    .replace(/\b(?:DD|RR)\b\s*[:\-]/gi, "")
+    .replace(/\(\s*(?:DD|RR)[^)]+\)/gi, "")
+    .replace(/\s*;\s*;\s*/g, "; ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function buildOpenEvidenceQuery(question) {
   const lines = [];
   lines.push("Explain this ENT inservice review question and the best answer.");
@@ -227,27 +259,37 @@ function sortFacetEntries(counts, facetKey) {
 }
 
 function normalizeFactShape(rawFact) {
-  const topic = rawFact.topic || "Unspecified";
+  const sanitizeText = (value) => normalizeOcrDoubledSegments(stripShorthandMarkers(value));
+
+  const topic = sanitizeText(rawFact.topic || "Unspecified");
   const chapter =
-    rawFact.chapter ||
+    sanitizeText(rawFact.chapter) ||
     (rawFact.chapterNumber && rawFact.chapterTitle
-      ? `Chapter ${rawFact.chapterNumber}: ${rawFact.chapterTitle}`
+      ? `Chapter ${rawFact.chapterNumber}: ${sanitizeText(rawFact.chapterTitle)}`
       : topic);
 
-  const organSystems = Array.isArray(rawFact.organSystems) ? rawFact.organSystems : [];
-  const diseaseDomains = Array.isArray(rawFact.diseaseDomains)
-    ? rawFact.diseaseDomains
-    : Array.isArray(rawFact.clinicalDomains)
-    ? rawFact.clinicalDomains
+  const term = sanitizeText(rawFact.term || "");
+  const definition = sanitizeText(rawFact.definition || "");
+  const section = sanitizeText(rawFact.section || "");
+
+  const organSystems = Array.isArray(rawFact.organSystems)
+    ? rawFact.organSystems.map((value) => sanitizeText(value))
     : [];
-  const focusAreas = Array.isArray(rawFact.focusAreas) ? rawFact.focusAreas : [];
+  const diseaseDomains = Array.isArray(rawFact.diseaseDomains)
+    ? rawFact.diseaseDomains.map((value) => sanitizeText(value))
+    : Array.isArray(rawFact.clinicalDomains)
+    ? rawFact.clinicalDomains.map((value) => sanitizeText(value))
+    : [];
+  const focusAreas = Array.isArray(rawFact.focusAreas)
+    ? rawFact.focusAreas.map((value) => sanitizeText(value))
+    : [];
 
   const searchText = [
-    rawFact.term || "",
-    rawFact.definition || "",
+    term,
+    definition,
     topic,
     chapter,
-    rawFact.section || "",
+    section,
     organSystems.join(" "),
     diseaseDomains.join(" "),
     focusAreas.join(" "),
@@ -259,7 +301,9 @@ function normalizeFactShape(rawFact) {
     ...rawFact,
     topic,
     chapter,
-    section: rawFact.section || "",
+    section,
+    term,
+    definition,
     organSystems,
     diseaseDomains,
     focusAreas,
@@ -1244,20 +1288,13 @@ function init() {
   }
 
   const fallbackFacetCounts = computeFacetCountsFromFacts(state.facts);
-  const incomingFacetCounts = bank.facetCounts || {};
-
   state.facetCounts = {
-    topic: incomingFacetCounts.topic || bank.topicCounts || fallbackFacetCounts.topic,
-    chapter: incomingFacetCounts.chapter || fallbackFacetCounts.chapter,
-    section: incomingFacetCounts.section || fallbackFacetCounts.section || {},
-    organSystems:
-      incomingFacetCounts.organSystems || fallbackFacetCounts.organSystems || {},
-    diseaseDomains:
-      incomingFacetCounts.diseaseDomains ||
-      incomingFacetCounts.clinicalDomains ||
-      fallbackFacetCounts.diseaseDomains ||
-      {},
-    focusAreas: incomingFacetCounts.focusAreas || fallbackFacetCounts.focusAreas || {},
+    topic: fallbackFacetCounts.topic || {},
+    chapter: fallbackFacetCounts.chapter || {},
+    section: fallbackFacetCounts.section || {},
+    organSystems: fallbackFacetCounts.organSystems || {},
+    diseaseDomains: fallbackFacetCounts.diseaseDomains || {},
+    focusAreas: fallbackFacetCounts.focusAreas || {},
   };
 
   const sourceTypeCounts = bank.sourceTypeCounts || {};
