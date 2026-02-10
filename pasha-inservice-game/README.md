@@ -19,6 +19,7 @@ Browser-based study game for ENT inservice review, generated from your local Pas
   - mixed or single-direction question mode
   - cloze mode with typed distractors (eg, percentages, genes/markers, CNs, stages, measurements)
   - timed mode (optional)
+  - Kadoo mode (multiplayer hot-seat: same questions, timed turns, shared leaderboard)
   - relevant prose fact toggle (on by default, with quality filtering)
   - score, streak, and missed-fact review
   - download of missed facts for focused review
@@ -56,6 +57,15 @@ python3 -m http.server 4173
 Then open:
 
 `http://localhost:4173`
+
+### Kadoo Mode (Multiplayer)
+
+1. Enable `Kadoo Mode (Multiplayer Timed Turns)` in setup.
+2. Enter at least 2 player names (comma-separated).
+3. Pick a turn timer.
+4. Start the round.
+
+Each player answers the exact same question before the round moves to the next question. The game tracks per-player points and shows a leaderboard in-game and on results.
 
 ## Deploy to GitHub Pages
 

@@ -13,9 +13,14 @@ const state = {
   timedMode: false,
   timerId: null,
   timeLeft: 25,
+  turnSeconds: 25,
   answerLocked: false,
   currentOpenEvidenceQuery: "",
   choicePools: {},
+  kadooMode: false,
+  kadooPlayers: [],
+  kadooPlayerIndex: 0,
+  pendingAdvance: "",
 };
 
 const els = {
@@ -27,6 +32,10 @@ const els = {
   modeSelect: document.getElementById("modeSelect"),
   countSelect: document.getElementById("countSelect"),
   timedToggle: document.getElementById("timedToggle"),
+  kadooToggle: document.getElementById("kadooToggle"),
+  kadooConfig: document.getElementById("kadooConfig"),
+  kadooPlayersInput: document.getElementById("kadooPlayersInput"),
+  kadooSecondsSelect: document.getElementById("kadooSecondsSelect"),
   includeProseToggle: document.getElementById("includeProseToggle"),
   keywordFilter: document.getElementById("keywordFilter"),
   topicList: document.getElementById("topicList"),
@@ -44,6 +53,9 @@ const els = {
   questionTopic: document.getElementById("questionTopic"),
   questionPrompt: document.getElementById("questionPrompt"),
   questionDetail: document.getElementById("questionDetail"),
+  kadooPanel: document.getElementById("kadooPanel"),
+  kadooTurnLabel: document.getElementById("kadooTurnLabel"),
+  kadooScoreboard: document.getElementById("kadooScoreboard"),
   openEvidenceLink: document.getElementById("openEvidenceLink"),
   openEvidenceStatus: document.getElementById("openEvidenceStatus"),
   options: document.getElementById("options"),
@@ -51,6 +63,8 @@ const els = {
   nextBtn: document.getElementById("nextBtn"),
   resultsSummary: document.getElementById("resultsSummary"),
   missedList: document.getElementById("missedList"),
+  leaderboardWrap: document.getElementById("leaderboardWrap"),
+  resultsLeaderboard: document.getElementById("resultsLeaderboard"),
   restartBtn: document.getElementById("restartBtn"),
   downloadMissedBtn: document.getElementById("downloadMissedBtn"),
 };
@@ -529,10 +543,120 @@ function updateFilterMeta() {
   )}).`;
 }
 
+function parseKadooPlayers(rawValue) {
+  const seen = new Set();
+  return String(rawValue || "")
+    .split(/[,|\n]/)
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .filter((name) => {
+      const key = normalizeChoice(name);
+      if (!key || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .map((name, index) => ({
+      id: `p${index + 1}`,
+      name: trimForDisplay(name, 28),
+      score: 0,
+      correct: 0,
+      missed: 0,
+    }));
+}
+
+function isKadooEnabled() {
+  return Boolean(els.kadooToggle && els.kadooToggle.checked);
+}
+
+function syncKadooConfigVisibility() {
+  const enabled = isKadooEnabled();
+  if (els.kadooConfig) {
+    els.kadooConfig.hidden = !enabled;
+  }
+  if (els.timedToggle) {
+    if (enabled) {
+      els.timedToggle.checked = true;
+      els.timedToggle.disabled = true;
+    } else {
+      els.timedToggle.disabled = false;
+    }
+  }
+}
+
+function getCurrentKadooPlayer() {
+  return state.kadooPlayers[state.kadooPlayerIndex] || null;
+}
+
+function getKadooLeaderboard() {
+  return [...state.kadooPlayers].sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    if (right.correct !== left.correct) {
+      return right.correct - left.correct;
+    }
+    return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+  });
+}
+
+function renderKadooScoreboard(container, activePlayerId = "") {
+  if (!container) {
+    return;
+  }
+  container.innerHTML = "";
+  const leaderboard = getKadooLeaderboard();
+  leaderboard.forEach((player, index) => {
+    const row = document.createElement("div");
+    row.className = "kadoo-row";
+    if (activePlayerId && player.id === activePlayerId) {
+      row.classList.add("active");
+    }
+
+    const name = document.createElement("span");
+    name.className = "kadoo-name";
+    name.textContent = `${index + 1}. ${player.name}`;
+
+    const stats = document.createElement("span");
+    stats.className = "kadoo-stats";
+    stats.textContent = `${player.score} pts · ${player.correct} correct · ${player.missed} missed`;
+
+    row.appendChild(name);
+    row.appendChild(stats);
+    container.appendChild(row);
+  });
+}
+
 function updateHud() {
   els.progressLabel.textContent = `Question ${state.index + 1} / ${state.roundFacts.length}`;
-  els.scoreLabel.textContent = `Score ${state.score}`;
-  els.streakLabel.textContent = `Streak ${state.streak}`;
+  if (!state.kadooMode) {
+    els.scoreLabel.textContent = `Score ${state.score}`;
+    els.streakLabel.textContent = `Streak ${state.streak}`;
+    if (els.kadooPanel) {
+      els.kadooPanel.hidden = true;
+    }
+    return;
+  }
+
+  const currentPlayer = getCurrentKadooPlayer();
+  const leader = getKadooLeaderboard()[0];
+  els.scoreLabel.textContent = leader
+    ? `Leader ${leader.name}: ${leader.score} pts`
+    : "Leader: -";
+  els.streakLabel.textContent = currentPlayer
+    ? `Current Player: ${currentPlayer.name}`
+    : "Current Player: -";
+
+  if (els.kadooPanel) {
+    els.kadooPanel.hidden = false;
+  }
+  if (els.kadooTurnLabel) {
+    els.kadooTurnLabel.textContent = currentPlayer
+      ? `Turn ${state.kadooPlayerIndex + 1}/${state.kadooPlayers.length}: ${currentPlayer.name}`
+      : "";
+  }
+  renderKadooScoreboard(els.kadooScoreboard, currentPlayer ? currentPlayer.id : "");
 }
 
 function clearTimer() {
@@ -549,8 +673,9 @@ function startTimer() {
     return;
   }
 
+  const startingSeconds = Number(state.turnSeconds) || 25;
   els.timerLabel.hidden = false;
-  state.timeLeft = 25;
+  state.timeLeft = startingSeconds;
   els.timerLabel.textContent = `Time ${state.timeLeft}s`;
   els.timerLabel.classList.toggle("low", state.timeLeft <= 7);
 
@@ -1159,20 +1284,33 @@ function buildQuestionWithFallback(baseFact, mode) {
 
 function renderQuestion() {
   state.answerLocked = false;
+  state.pendingAdvance = "";
   const fact = state.roundFacts[state.index];
-  let selectedMode = els.modeSelect.value;
-  if (selectedMode === "mixed") {
-    const roll = Math.random();
-    if (roll < 0.55) {
-      selectedMode = "cloze";
-    } else if (roll < 0.78) {
-      selectedMode = "term-to-definition";
-    } else {
-      selectedMode = "definition-to-term";
-    }
-  }
+  let question = null;
+  const canReuseKadooQuestion =
+    state.kadooMode &&
+    state.kadooPlayerIndex > 0 &&
+    state.currentQuestion &&
+    state.currentQuestion.fact &&
+    state.currentQuestion.fact.id === fact.id;
 
-  const question = buildQuestionWithFallback(fact, selectedMode);
+  if (canReuseKadooQuestion) {
+    question = state.currentQuestion;
+  } else {
+    let selectedMode = els.modeSelect.value;
+    if (selectedMode === "mixed") {
+      const roll = Math.random();
+      if (roll < 0.55) {
+        selectedMode = "cloze";
+      } else if (roll < 0.78) {
+        selectedMode = "term-to-definition";
+      } else {
+        selectedMode = "definition-to-term";
+      }
+    }
+
+    question = buildQuestionWithFallback(fact, selectedMode);
+  }
   if (!question) {
     els.setupError.textContent =
       "Not enough distinct facts to generate options. Widen filters and retry.";
@@ -1221,6 +1359,12 @@ function finalizeQuestion(selectedOption, isTimeout) {
   clearTimer();
 
   const isCorrect = Boolean(selectedOption && selectedOption.correct && !isTimeout);
+  const selectedValue = isTimeout
+    ? "(time expired)"
+    : selectedOption
+    ? selectedOption.value
+    : "(none)";
+  const correctOption = state.currentQuestion.options.find((option) => option.correct);
   const optionButtons = Array.from(els.options.querySelectorAll("button"));
   optionButtons.forEach((button, index) => {
     button.disabled = true;
@@ -1232,6 +1376,57 @@ function finalizeQuestion(selectedOption, isTimeout) {
     }
   });
 
+  if (state.kadooMode) {
+    const player = getCurrentKadooPlayer();
+    const playerName = player ? player.name : "Player";
+
+    if (player) {
+      if (isCorrect) {
+        const points = 100 + Math.max(0, state.timeLeft) * 4;
+        player.score += points;
+        player.correct += 1;
+        els.feedback.textContent = `${playerName}: Correct. +${points} points.`;
+        els.feedback.className = "feedback correct";
+      } else {
+        player.missed += 1;
+        els.feedback.textContent = isTimeout
+          ? `${playerName}: Time expired.`
+          : `${playerName}: Incorrect.`;
+        els.feedback.className = "feedback wrong";
+
+        state.missed.push({
+          player: playerName,
+          topic: state.currentQuestion.fact.topic,
+          chapter: state.currentQuestion.fact.chapter,
+          term: state.currentQuestion.fact.term,
+          definition: state.currentQuestion.fact.definition,
+          selected: selectedValue,
+          correct: correctOption ? correctOption.value : "",
+          mode: state.currentQuestion.mode,
+          sourceType: state.currentQuestion.fact.sourceType || "unknown",
+        });
+      }
+    }
+
+    const hasMorePlayers = state.kadooPlayerIndex < state.kadooPlayers.length - 1;
+    if (hasMorePlayers) {
+      const nextPlayer = state.kadooPlayers[state.kadooPlayerIndex + 1];
+      state.pendingAdvance = "next-player";
+      els.nextBtn.hidden = false;
+      els.nextBtn.textContent = nextPlayer
+        ? `Next Player: ${nextPlayer.name}`
+        : "Next Player";
+    } else {
+      const hasMoreQuestions = state.index < state.roundFacts.length - 1;
+      state.pendingAdvance = hasMoreQuestions ? "next-question" : "finish-round";
+      els.nextBtn.hidden = false;
+      els.nextBtn.textContent = hasMoreQuestions ? "Next Question" : "See Results";
+    }
+
+    updateHud();
+    return;
+  }
+
   if (isCorrect) {
     state.correct += 1;
     state.streak += 1;
@@ -1241,12 +1436,6 @@ function finalizeQuestion(selectedOption, isTimeout) {
     els.feedback.className = "feedback correct";
   } else {
     state.streak = 0;
-    const selectedValue = isTimeout
-      ? "(time expired)"
-      : selectedOption
-      ? selectedOption.value
-      : "(none)";
-    const correctOption = state.currentQuestion.options.find((option) => option.correct);
 
     state.missed.push({
       topic: state.currentQuestion.fact.topic,
@@ -1304,6 +1493,9 @@ function renderMissed() {
     const termLabel = miss.mode === "cloze-typed" ? "Fact Term" : "Term";
     const definitionLabel =
       miss.mode === "cloze-typed" || miss.mode === "cloze-term" ? "Cloze Stem" : "Definition";
+    if (miss.player) {
+      addLine(card, "Player", miss.player);
+    }
     addLine(card, "Chapter", miss.chapter || "");
     addLine(card, "Topic", miss.topic);
     addLine(card, termLabel, miss.term);
@@ -1315,15 +1507,47 @@ function renderMissed() {
 }
 
 function finishRound() {
-  const total = state.roundFacts.length;
-  const percent = total > 0 ? Math.round((state.correct / total) * 100) : 0;
-  els.resultsSummary.textContent = `Score ${state.score}. Accuracy ${state.correct}/${total} (${percent}%). Missed ${state.missed.length}.`;
+  if (state.kadooMode) {
+    const totalTurns = state.roundFacts.length * state.kadooPlayers.length;
+    const totalCorrect = state.kadooPlayers.reduce((sum, player) => sum + player.correct, 0);
+    const percent = totalTurns > 0 ? Math.round((totalCorrect / totalTurns) * 100) : 0;
+    const leaderboard = getKadooLeaderboard();
+    const winner = leaderboard[0];
+    els.resultsSummary.textContent = winner
+      ? `Winner: ${winner.name} (${winner.score} pts). Group accuracy ${totalCorrect}/${totalTurns} (${percent}%). Missed ${state.missed.length}.`
+      : `Group accuracy ${totalCorrect}/${totalTurns} (${percent}%).`;
+    if (els.leaderboardWrap) {
+      els.leaderboardWrap.hidden = false;
+    }
+    renderKadooScoreboard(els.resultsLeaderboard, "");
+  } else {
+    const total = state.roundFacts.length;
+    const percent = total > 0 ? Math.round((state.correct / total) * 100) : 0;
+    els.resultsSummary.textContent = `Score ${state.score}. Accuracy ${state.correct}/${total} (${percent}%). Missed ${state.missed.length}.`;
+    if (els.leaderboardWrap) {
+      els.leaderboardWrap.hidden = true;
+    }
+  }
   renderMissed();
   showPanel("results");
 }
 
 function startRound() {
   els.setupError.textContent = "";
+  state.kadooMode = isKadooEnabled();
+  state.kadooPlayers = [];
+  state.kadooPlayerIndex = 0;
+  state.pendingAdvance = "";
+
+  if (state.kadooMode) {
+    const players = parseKadooPlayers(els.kadooPlayersInput ? els.kadooPlayersInput.value : "");
+    if (players.length < 2) {
+      els.setupError.textContent =
+        "Kadoo mode needs at least 2 players. Add comma-separated names.";
+      return;
+    }
+    state.kadooPlayers = players;
+  }
 
   const filtered = applyFilters(true);
   if (filtered.error) {
@@ -1352,13 +1576,35 @@ function startRound() {
   state.score = 0;
   state.streak = 0;
   state.missed = [];
-  state.timedMode = els.timedToggle.checked;
+  state.timedMode = state.kadooMode ? true : els.timedToggle.checked;
+  state.turnSeconds = state.kadooMode
+    ? Number(els.kadooSecondsSelect ? els.kadooSecondsSelect.value : 20) || 20
+    : 25;
 
   showPanel("game");
   renderQuestion();
 }
 
 function gotoNextQuestion() {
+  if (state.kadooMode) {
+    if (state.pendingAdvance === "next-player") {
+      state.kadooPlayerIndex += 1;
+      renderQuestion();
+      return;
+    }
+    if (state.pendingAdvance === "next-question") {
+      state.index += 1;
+      state.kadooPlayerIndex = 0;
+      renderQuestion();
+      return;
+    }
+    if (state.pendingAdvance === "finish-round") {
+      finishRound();
+      return;
+    }
+    return;
+  }
+
   if (state.index >= state.roundFacts.length - 1) {
     finishRound();
     return;
@@ -1377,6 +1623,9 @@ function downloadMissedFacts() {
   lines.push("");
   state.missed.forEach((miss, index) => {
     lines.push(`Item ${index + 1}`);
+    if (miss.player) {
+      lines.push(`Player: ${miss.player}`);
+    }
     lines.push(`Chapter: ${miss.chapter || ""}`);
     lines.push(`Topic: ${miss.topic}`);
     lines.push(
@@ -1437,12 +1686,15 @@ function init() {
 
   refreshSectionFacet(false);
   updateFilterMeta();
+  syncKadooConfigVisibility();
 }
 
 els.startBtn.addEventListener("click", startRound);
 els.nextBtn.addEventListener("click", gotoNextQuestion);
 els.restartBtn.addEventListener("click", () => {
   clearTimer();
+  state.pendingAdvance = "";
+  state.kadooPlayerIndex = 0;
   showPanel("setup");
 });
 els.downloadMissedBtn.addEventListener("click", downloadMissedFacts);
@@ -1468,6 +1720,12 @@ els.chapterList.addEventListener("change", () => {
 els.keywordFilter.addEventListener("input", () => {
   updateFilterMeta();
 });
+
+if (els.kadooToggle) {
+  els.kadooToggle.addEventListener("change", () => {
+    syncKadooConfigVisibility();
+  });
+}
 
 els.openEvidenceLink.addEventListener("click", () => {
   if (!state.currentOpenEvidenceQuery) {

@@ -51,8 +51,35 @@
           </label>
 
           <label class="field checkbox-field">
+            <input id="kadooToggle" type="checkbox" />
+            <span>Kadoo Mode (Multiplayer Timed Turns)</span>
+          </label>
+
+          <label class="field checkbox-field">
             <input id="includeProseToggle" type="checkbox" checked />
             <span>Include Relevant Prose Facts</span>
+          </label>
+        </div>
+
+        <div id="kadooConfig" class="controls" hidden>
+          <label class="field">
+            <span>Player Names (comma separated)</span>
+            <input
+              id="kadooPlayersInput"
+              type="text"
+              placeholder="Alex, Sam, Jordan"
+            />
+          </label>
+
+          <label class="field">
+            <span>Turn Timer</span>
+            <select id="kadooSecondsSelect">
+              <option value="10">10 seconds</option>
+              <option value="15">15 seconds</option>
+              <option value="20" selected>20 seconds</option>
+              <option value="25">25 seconds</option>
+              <option value="30">30 seconds</option>
+            </select>
           </label>
         </div>
 
@@ -178,6 +205,10 @@
           <h2 id="questionPrompt"></h2>
           <p id="questionDetail" class="detail"></p>
         </article>
+        <section id="kadooPanel" class="kadoo-panel" hidden>
+          <p id="kadooTurnLabel" class="kadoo-turn"></p>
+          <div id="kadooScoreboard" class="kadoo-scoreboard"></div>
+        </section>
         <div class="question-actions">
           <a
             id="openEvidenceLink"
@@ -199,6 +230,10 @@
       <section id="resultsPanel" class="panel" hidden>
         <h2>Round Complete</h2>
         <p id="resultsSummary" class="summary"></p>
+        <section id="leaderboardWrap" class="leaderboard-wrap" hidden>
+          <h3>Kadoo Leaderboard</h3>
+          <div id="resultsLeaderboard" class="kadoo-scoreboard"></div>
+        </section>
         <div class="results-actions">
           <button id="downloadMissedBtn" class="ghost" type="button">
             Download Missed Facts

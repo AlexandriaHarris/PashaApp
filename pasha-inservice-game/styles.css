@@ -205,6 +205,10 @@ select {
   accent-color: var(--accent);
 }
 
+.checkbox-field input:disabled + span {
+  color: #6f8a91;
+}
+
 .topic-header {
   display: flex;
   justify-content: space-between;
@@ -385,6 +389,53 @@ button:disabled {
   align-items: center;
 }
 
+.kadoo-panel {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.kadoo-turn {
+  margin: 0;
+  font-weight: 700;
+  color: #0f5a52;
+}
+
+.kadoo-scoreboard {
+  display: grid;
+  gap: 8px;
+}
+
+.kadoo-row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.kadoo-row.active {
+  border-color: #84c9bb;
+  background: #eff8f6;
+}
+
+.kadoo-name {
+  font-weight: 700;
+}
+
+.kadoo-stats {
+  color: var(--muted);
+  font-size: 0.87rem;
+  text-align: right;
+}
+
 .evidence-status {
   margin: 0;
   font-size: 0.86rem;
@@ -430,6 +481,12 @@ button:disabled {
 
 .summary {
   color: var(--muted);
+}
+
+.leaderboard-wrap {
+  margin: 10px 0;
+  display: grid;
+  gap: 8px;
 }
 
 .results-actions {
