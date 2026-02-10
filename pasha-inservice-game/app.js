@@ -686,11 +686,12 @@ function buildTypedClozeQuestion(fact) {
       { value: anchor.value, correct: true },
       ...distractors.map((value) => ({ value, correct: false })),
     ]);
+    const questionTerm = trimForDisplay(fact.term, 92);
 
     return {
       fact,
       mode: "cloze-typed",
-      prompt: `Fill in the blank for "${fact.term}".`,
+      prompt: `What ${formatTypeLabel(anchor.type)} correctly completes this statement about "${questionTerm}"?`,
       detail: `${clozeDefinition}\n\nPick the best ${formatTypeLabel(anchor.type)}.`,
       options,
     };
@@ -811,8 +812,8 @@ function buildTermClozeQuestion(fact) {
   return {
     fact,
     mode: "cloze-term",
-    prompt: "Fill in the blank term for this fact.",
-    detail: `_____ : ${fact.definition}`,
+    prompt: "Which term correctly completes this fact?",
+    detail: `${fact.definition}\n\nAnswer: _____`,
     options: shuffle(options),
   };
 }
