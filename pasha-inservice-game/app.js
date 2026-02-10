@@ -572,6 +572,104 @@ function hasExplanatoryVerb(text) {
   );
 }
 
+const GENERIC_HEADING_TERMS = new Set([
+  "approach",
+  "background",
+  "classification",
+  "clinical features",
+  "clinical presentation",
+  "complication",
+  "complications",
+  "contraindication",
+  "contraindications",
+  "diagnosis",
+  "differential diagnosis",
+  "disadvantage",
+  "disadvantages",
+  "epidemiology",
+  "etiology",
+  "evaluation",
+  "follow up",
+  "history",
+  "imaging",
+  "indication",
+  "indications",
+  "introduction",
+  "investigation",
+  "management",
+  "overview",
+  "pathogenesis",
+  "pathophysiology",
+  "pearls",
+  "pitfalls",
+  "prevention",
+  "prognosis",
+  "risk factors",
+  "signs and symptoms",
+  "staging",
+  "summary",
+  "symptoms",
+  "treatment",
+  "workup",
+]);
+
+function normalizeHeadingKey(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isGenericHeadingTerm(term) {
+  const normalized = normalizeHeadingKey(term);
+  if (!normalized) {
+    return true;
+  }
+  if (GENERIC_HEADING_TERMS.has(normalized)) {
+    return true;
+  }
+  if (/^(advantages?|disadvantages?|complications?|indications?|contraindications?)$/.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
+function buildFactContextLabel(fact) {
+  const seen = new Set();
+  const parts = [];
+
+  [fact.section, fact.topic, fact.chapter].forEach((rawPart) => {
+    const part = (rawPart || "").trim();
+    if (!part) {
+      return;
+    }
+    const key = normalizeChoice(part);
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    parts.push(part);
+  });
+
+  return trimForDisplay(parts.join(" • "), 140);
+}
+
+function withQuestionContext(fact, mainText, trailingText = "") {
+  const parts = [];
+  const context = buildFactContextLabel(fact);
+  if (context) {
+    parts.push(`Context: ${context}`);
+  }
+  if (mainText) {
+    parts.push(mainText);
+  }
+  if (trailingText) {
+    parts.push(trailingText);
+  }
+  return parts.join("\n\n");
+}
+
 function isNoisyShorthandTerm(term) {
   const normalized = (term || "").trim();
   if (!normalized) {
@@ -649,6 +747,9 @@ function isRelevantProseFact(fact) {
 
   const term = (fact.term || "").trim();
   if (!term || term.length > 70) {
+    return false;
+  }
+  if (isGenericHeadingTerm(term)) {
     return false;
   }
 
@@ -809,12 +910,23 @@ function buildTypedClozeQuestion(fact) {
       ...distractors.map((value) => ({ value, correct: false })),
     ]);
     const questionTerm = trimForDisplay(fact.term, 92);
+    const contextLabel = buildFactContextLabel(fact);
+    const hasGenericFocusTerm = isGenericHeadingTerm(questionTerm);
+    const prompt = hasGenericFocusTerm
+      ? `What ${formatTypeLabel(anchor.type)} correctly completes this statement${
+          contextLabel ? ` in ${contextLabel}` : ""
+        }?`
+      : `What ${formatTypeLabel(anchor.type)} correctly completes this statement about "${questionTerm}"?`;
 
     return {
       fact,
       mode: "cloze-typed",
-      prompt: `What ${formatTypeLabel(anchor.type)} correctly completes this statement about "${questionTerm}"?`,
-      detail: `${clozeDefinition}\n\nPick the best ${formatTypeLabel(anchor.type)}.`,
+      prompt,
+      detail: withQuestionContext(
+        fact,
+        clozeDefinition,
+        `Pick the best ${formatTypeLabel(anchor.type)}.`
+      ),
       options,
     };
   }
@@ -859,6 +971,9 @@ function buildTermClozeQuestion(fact) {
   const isGoodTermForCloze = (termValue) => {
     const cleaned = termValue.trim();
     if (cleaned.length < 2 || cleaned.length > 70) {
+      return false;
+    }
+    if (isGenericHeadingTerm(cleaned)) {
       return false;
     }
     if (isNoisyShorthandTerm(cleaned)) {
@@ -937,11 +1052,15 @@ function buildTermClozeQuestion(fact) {
     return null;
   }
 
+  const contextLabel = buildFactContextLabel(fact);
+
   return {
     fact,
     mode: "cloze-term",
-    prompt: "Which term correctly completes this fact?",
-    detail: `${fact.definition}\n\nAnswer: _____`,
+    prompt: contextLabel
+      ? `Which term correctly completes this fact in ${contextLabel}?`
+      : "Which term correctly completes this fact?",
+    detail: withQuestionContext(fact, fact.definition, "Answer: _____"),
     options: shuffle(options),
   };
 }
@@ -949,6 +1068,9 @@ function buildTermClozeQuestion(fact) {
 function buildQuestion(fact, mode) {
   if (mode === "cloze") {
     return buildTypedClozeQuestion(fact) || buildTermClozeQuestion(fact);
+  }
+  if (mode === "definition-to-term" && isGenericHeadingTerm(fact.term)) {
+    return null;
   }
 
   const correctValue = mode === "term-to-definition" ? fact.definition : fact.term;
@@ -976,6 +1098,9 @@ function buildQuestion(fact, mode) {
     if (!value || value.length < 3) {
       continue;
     }
+    if (mode === "definition-to-term" && isGenericHeadingTerm(value)) {
+      continue;
+    }
     options.push({
       value,
       correct: false,
@@ -990,15 +1115,18 @@ function buildQuestion(fact, mode) {
     return null;
   }
 
+  const contextLabel = buildFactContextLabel(fact);
   const prompt =
     mode === "term-to-definition"
-      ? `Best definition for "${fact.term}"?`
+      ? isGenericHeadingTerm(fact.term) && contextLabel
+        ? `Best definition for "${fact.term}" in ${contextLabel}?`
+        : `Best definition for "${fact.term}"?`
       : "Which term matches this description?";
 
   const detail =
     mode === "term-to-definition"
-      ? "Choose the best matching definition."
-      : trimForDisplay(fact.definition, 280);
+      ? withQuestionContext(fact, "Choose the best matching definition.")
+      : withQuestionContext(fact, trimForDisplay(fact.definition, 280));
 
   return {
     fact,
