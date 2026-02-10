@@ -550,6 +550,43 @@ function isPlayableFact(fact) {
   return true;
 }
 
+function isRelevantProseFact(fact) {
+  if (!fact || fact.sourceType !== "prose") {
+    return true;
+  }
+
+  if (!isPlayableFact(fact)) {
+    return false;
+  }
+
+  const typedTokens = findTypedTokens(`${fact.term} ${fact.definition}`).filter(
+    (token) => token.type !== "count"
+  );
+  if (typedTokens.length > 0) {
+    return true;
+  }
+
+  const term = (fact.term || "").trim();
+  if (!term || term.length > 70) {
+    return false;
+  }
+
+  const words = term.split(/\s+/);
+  if (words.length > 7) {
+    return false;
+  }
+
+  if (/\b(is|are|was|were|may|can|occurs?|results?|causes?)\b/i.test(term)) {
+    return false;
+  }
+
+  if ((term.match(/[,;:()]/g) || []).length >= 2) {
+    return false;
+  }
+
+  return /^[A-Za-z0-9][A-Za-z0-9'()/\s.-]*$/.test(term);
+}
+
 function buildPeerPool(fact) {
   const sameSection = state.activeFacts.filter(
     (other) => other.id !== fact.id && other.topic === fact.topic && other.section === fact.section
@@ -1077,7 +1114,9 @@ function startRound() {
 
   const includeProse = Boolean(els.includeProseToggle.checked);
   state.activeFacts = filtered.facts.filter(
-    (fact) => isPlayableFact(fact) && (includeProse || fact.sourceType !== "prose")
+    (fact) =>
+      isPlayableFact(fact) &&
+      (fact.sourceType !== "prose" || (includeProse && isRelevantProseFact(fact)))
   );
   if (state.activeFacts.length < 4) {
     els.setupError.textContent =

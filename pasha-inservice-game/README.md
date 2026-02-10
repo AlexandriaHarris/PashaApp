@@ -19,7 +19,7 @@ Browser-based study game for ENT inservice review, generated from your local Pas
   - mixed or single-direction question mode
   - cloze mode with typed distractors (eg, percentages, genes/markers, CNs, stages, measurements)
   - timed mode (optional)
-  - prose fact toggle (off by default to reduce noisy questions)
+  - relevant prose fact toggle (on by default, with quality filtering)
   - score, streak, and missed-fact review
   - download of missed facts for focused review
   - one-click `Open In OpenEvidence` link on each question (with query text copied to clipboard)
