@@ -522,6 +522,37 @@ function startTimer() {
   }, 1000);
 }
 
+function hasExplanatoryVerb(text) {
+  return /\b(is|are|was|were|has|have|contains?|consists?|includes?|forms?|occurs?|results?|causes?|provides?|presents?|treated|diagnosed|evaluated|associated|indicates?)\b/i.test(
+    text || ""
+  );
+}
+
+function isNoisyShorthandTerm(term) {
+  const normalized = (term || "").trim();
+  if (!normalized) {
+    return true;
+  }
+
+  if (/\b(?:RRxx|DDxx|RRxX|DDxX|RRx|DDx|Rx|Dx)\b/i.test(normalized)) {
+    return true;
+  }
+
+  if (/;/.test(normalized)) {
+    return true;
+  }
+
+  if (/^[a-z].*[;,]/.test(normalized)) {
+    return true;
+  }
+
+  if (!/[aeiou]/i.test(normalized) && normalized.length > 4) {
+    return true;
+  }
+
+  return false;
+}
+
 function isPlayableFact(fact) {
   if (!fact || !fact.term || !fact.definition) {
     return false;
@@ -538,10 +569,16 @@ function isPlayableFact(fact) {
   if (!/[A-Za-z]/.test(term) || !/[A-Za-z]/.test(definition)) {
     return false;
   }
+  if (isNoisyShorthandTerm(term)) {
+    return false;
+  }
   if (/^\d+(?:[-–]\d+)?$/.test(term)) {
     return false;
   }
   if ((term.match(/[,;:()]/g) || []).length >= 4) {
+    return false;
+  }
+  if (definition.split(/\s+/).length < 4) {
     return false;
   }
   if (/\.\s*\.\s*\./.test(term) || /\.\s*\.\s*\./.test(definition)) {
@@ -711,6 +748,10 @@ function replaceRangeWithBlank(text, start, end) {
 }
 
 function buildTypedClozeQuestion(fact) {
+  if (!hasExplanatoryVerb(fact.definition) && fact.definition.split(/\s+/).length < 8) {
+    return null;
+  }
+
   const anchors = findTypedTokens(fact.definition).filter((token) => token.type !== "count");
   for (const anchor of anchors) {
     const distractors = pickTypedDistractors(anchor.type, anchor.value, 3);
@@ -742,6 +783,9 @@ function buildTermClozeQuestion(fact) {
   if (!correctTerm || correctTerm.length < 2) {
     return null;
   }
+  if (!hasExplanatoryVerb(fact.definition)) {
+    return null;
+  }
 
   const stopWords = new Set([
     "of",
@@ -771,6 +815,9 @@ function buildTermClozeQuestion(fact) {
   const isGoodTermForCloze = (termValue) => {
     const cleaned = termValue.trim();
     if (cleaned.length < 2 || cleaned.length > 70) {
+      return false;
+    }
+    if (isNoisyShorthandTerm(cleaned)) {
       return false;
     }
     const words = cleaned.split(/\s+/);
