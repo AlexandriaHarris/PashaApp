@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Question Evidence Checker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <main class="layout">
+      <header class="hero">
+        <p class="eyebrow">Evidence QA Lab</p>
+        <h1>Question Evidence Checker</h1>
+        <p class="subtitle">
+          Import your question bank, open evidence prompts instantly, and track what is verified.
+        </p>
+      </header>
+
+      <section class="panel import-panel">
+        <div class="import-grid">
+          <label class="field">
+            <span>Paste Question JSON</span>
+            <textarea
+              id="jsonInput"
+              rows="7"
+              placeholder='Paste an array or an object like {"questions":[...]}'
+            ></textarea>
+          </label>
+
+          <div class="stack">
+            <label class="field">
+              <span>Import From File</span>
+              <input id="fileInput" type="file" accept=".json,application/json" />
+            </label>
+
+            <div class="button-row">
+              <button id="importBtn" class="primary" type="button">Load Questions</button>
+              <button id="sampleBtn" class="ghost" type="button">Load Sample</button>
+              <button id="clearBtn" class="ghost" type="button">Clear</button>
+            </div>
+
+            <div class="button-row">
+              <button id="exportJsonBtn" class="ghost" type="button">Export Report (JSON)</button>
+              <button id="exportCsvBtn" class="ghost" type="button">Export Report (CSV)</button>
+            </div>
+
+            <p id="importStatus" class="status" role="status" aria-live="polite"></p>
+          </div>
+        </div>
+
+        <div class="chips">
+          <p id="totalChip" class="chip">Total: 0</p>
+          <p id="verifiedChip" class="chip chip-ok">Verified: 0</p>
+          <p id="reviseChip" class="chip chip-warn">Needs Revision: 0</p>
+          <p id="unclearChip" class="chip chip-alert">Unclear: 0</p>
+          <p id="unreviewedChip" class="chip">Unreviewed: 0</p>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel bank-panel">
+          <div class="bank-controls">
+            <label class="field">
+              <span>Find Question</span>
+              <input id="searchInput" type="search" placeholder="Search id, stem, explanation..." />
+            </label>
+
+            <label class="field">
+              <span>Status Filter</span>
+              <select id="statusFilter">
+                <option value="all" selected>All</option>
+                <option value="unreviewed">Unreviewed</option>
+                <option value="verified">Verified</option>
+                <option value="revise">Needs Revision</option>
+                <option value="unclear">Unclear</option>
+              </select>
+            </label>
+          </div>
+
+          <p id="listMeta" class="muted">Import questions to begin.</p>
+          <div id="questionList" class="question-list"></div>
+        </aside>
+
+        <section class="panel detail-panel">
+          <div id="emptyState" class="empty-state">
+            <h2>No Question Selected</h2>
+            <p>Load a question set and choose an item from the list.</p>
+          </div>
+
+          <div id="detailView" hidden>
+            <article class="question-card">
+              <p id="questionMeta" class="meta-tag"></p>
+              <h2 id="questionPrompt"></h2>
+              <ol id="questionOptions" class="question-options"></ol>
+              <div class="explanation-box">
+                <h3>Current Explanation</h3>
+                <p id="questionExplanation"></p>
+              </div>
+              <div class="reference-box">
+                <h3>Current References</h3>
+                <ul id="questionReferences"></ul>
+              </div>
+            </article>
+
+            <section class="panel nested-panel">
+              <div class="section-head">
+                <h3>Evidence Prompt</h3>
+                <button id="resetPromptBtn" class="ghost tiny" type="button">Reset Prompt</button>
+              </div>
+              <textarea id="queryEditor" rows="8"></textarea>
+              <div class="button-row">
+                <button id="openEvidenceBtn" class="primary" type="button">OpenEvidence</button>
+                <button id="openAnswerCheckBtn" class="ghost" type="button">Answer Check</button>
+                <button id="openPubMedBtn" class="ghost" type="button">PubMed Search</button>
+                <button id="copyPromptBtn" class="ghost" type="button">Copy Prompt</button>
+              </div>
+              <p id="queryStatus" class="status" role="status" aria-live="polite"></p>
+            </section>
+
+            <section class="panel nested-panel">
+              <h3>Claim Checks</h3>
+              <p class="muted">
+                Sentence-level checks generated from your explanation. Use these to validate each claim quickly.
+              </p>
+              <div id="claimList" class="claim-list"></div>
+            </section>
+
+            <section class="panel nested-panel">
+              <h3>Review Notes</h3>
+              <div class="review-grid">
+                <label class="field">
+                  <span>Status</span>
+                  <select id="reviewStatus">
+                    <option value="unreviewed">Unreviewed</option>
+                    <option value="verified">Verified</option>
+                    <option value="revise">Needs Revision</option>
+                    <option value="unclear">Unclear</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>Confidence (0-100)</span>
+                  <input id="reviewConfidence" type="number" min="0" max="100" step="1" />
+                </label>
+              </div>
+
+              <label class="field">
+                <span>Citations (one URL or citation per line)</span>
+                <textarea id="reviewCitations" rows="4"></textarea>
+              </label>
+
+              <label class="field">
+                <span>Notes</span>
+                <textarea id="reviewNotes" rows="5"></textarea>
+              </label>
+
+              <div class="button-row">
+                <button id="saveReviewBtn" class="primary" type="button">Save Review</button>
+                <button data-quick-status="verified" class="ghost" type="button">Mark Verified</button>
+                <button data-quick-status="revise" class="ghost" type="button">Mark Needs Revision</button>
+                <button data-quick-status="unclear" class="ghost" type="button">Mark Unclear</button>
+              </div>
+
+              <p id="reviewMeta" class="status"></p>
+            </section>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
