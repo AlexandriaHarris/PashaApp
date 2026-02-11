@@ -21,6 +21,7 @@ const state = {
   kadooPlayers: [],
   kadooPlayerIndex: 0,
   pendingAdvance: "",
+  missedFactIds: [],
 };
 
 const els = {
@@ -31,6 +32,7 @@ const els = {
   filterMeta: document.getElementById("filterMeta"),
   modeSelect: document.getElementById("modeSelect"),
   countSelect: document.getElementById("countSelect"),
+  difficultySelect: document.getElementById("difficultySelect"),
   timedToggle: document.getElementById("timedToggle"),
   kadooToggle: document.getElementById("kadooToggle"),
   kadooConfig: document.getElementById("kadooConfig"),
@@ -60,6 +62,7 @@ const els = {
   openEvidenceStatus: document.getElementById("openEvidenceStatus"),
   options: document.getElementById("options"),
   feedback: document.getElementById("feedback"),
+  feedbackDetail: document.getElementById("feedbackDetail"),
   nextBtn: document.getElementById("nextBtn"),
   resultsSummary: document.getElementById("resultsSummary"),
   missedList: document.getElementById("missedList"),
@@ -67,6 +70,8 @@ const els = {
   resultsLeaderboard: document.getElementById("resultsLeaderboard"),
   restartBtn: document.getElementById("restartBtn"),
   downloadMissedBtn: document.getElementById("downloadMissedBtn"),
+  missedCountLabel: document.getElementById("missedCountLabel"),
+  clearMissedBtn: document.getElementById("clearMissedBtn"),
 };
 
 const facetConfigs = {
@@ -322,6 +327,10 @@ function normalizeFactShape(rawFact) {
     diseaseDomains,
     focusAreas,
     searchText,
+    siblingIds: Array.isArray(rawFact.siblingIds) ? rawFact.siblingIds : [],
+    relatedIds: Array.isArray(rawFact.relatedIds) ? rawFact.relatedIds : [],
+    qualityTier: rawFact.qualityTier || "medium",
+    parentSection: rawFact.parentSection || "",
   };
 }
 
@@ -539,8 +548,7 @@ function updateFilterMeta() {
     return;
   }
 
-  els.filterMeta.textContent = `${facts.length} facts match active filters (${activeFacets.join(", "
-  )}).`;
+  els.filterMeta.textContent = `${facts.length} facts match active filters (${activeFacets.join(", ")}).`;
 }
 
 function parseKadooPlayers(rawValue) {
@@ -830,7 +838,7 @@ function isPlayableFact(fact) {
   if (term.length < 2 || term.length > 110) {
     return false;
   }
-  if (definition.length < 12 || definition.length > 420) {
+  if (definition.length < 12 || definition.length > 320) {
     return false;
   }
   if (!/[A-Za-z]/.test(term) || !/[A-Za-z]/.test(definition)) {
@@ -845,7 +853,12 @@ function isPlayableFact(fact) {
   if ((term.match(/[,;:()]/g) || []).length >= 4) {
     return false;
   }
-  if (definition.split(/\s+/).length < 4) {
+  const definitionWords = definition.split(/\s+/);
+  if (definitionWords.length < 4 || definitionWords.length > 56) {
+    return false;
+  }
+  const commaCount = (definition.match(/,/g) || []).length;
+  if (definition.length > 200 && !/[.;!?]/.test(definition) && commaCount >= 4) {
     return false;
   }
   if (/\.\s*\.\s*\./.test(term) || /\.\s*\.\s*\./.test(definition)) {
@@ -892,6 +905,54 @@ function isRelevantProseFact(fact) {
   }
 
   return /^[A-Za-z0-9][A-Za-z0-9'()/\s.-]*$/.test(term);
+}
+
+function buildSmartPeerPool(fact) {
+  const siblings = fact.siblingIds && fact.siblingIds.length > 0
+    ? state.activeFacts.filter(f => fact.siblingIds.includes(f.id))
+    : [];
+
+  const sameOrganAndLength = fact.organSystems && fact.organSystems.length > 0
+    ? state.activeFacts.filter(
+        f =>
+          f.id !== fact.id &&
+          !siblings.some(s => s.id === f.id) &&
+          f.organSystems &&
+          f.organSystems.some(org => fact.organSystems.includes(org)) &&
+          Math.abs((f.term || "").length - (fact.term || "").length) <= 20
+      )
+    : [];
+
+  const sameDiseaseDomain = fact.diseaseDomains && fact.diseaseDomains.length > 0
+    ? state.activeFacts.filter(
+        f =>
+          f.id !== fact.id &&
+          !siblings.some(s => s.id === f.id) &&
+          !sameOrganAndLength.some(s => s.id === f.id) &&
+          f.diseaseDomains &&
+          f.diseaseDomains.some(dd => fact.diseaseDomains.includes(dd))
+      )
+    : [];
+
+  const sameTopic = state.activeFacts.filter(
+    (f) =>
+      f.id !== fact.id &&
+      !siblings.some(s => s.id === f.id) &&
+      !sameOrganAndLength.some(s => s.id === f.id) &&
+      !sameDiseaseDomain.some(s => s.id === f.id) &&
+      f.topic === fact.topic
+  );
+
+  const fallback = state.activeFacts.filter(
+    (f) =>
+      f.id !== fact.id &&
+      !siblings.some(s => s.id === f.id) &&
+      !sameOrganAndLength.some(s => s.id === f.id) &&
+      !sameDiseaseDomain.some(s => s.id === f.id) &&
+      !sameTopic.some(s => s.id === f.id)
+  );
+
+  return shuffle([...siblings, ...sameOrganAndLength, ...sameDiseaseDomain, ...sameTopic, ...fallback]);
 }
 
 function buildPeerPool(fact) {
@@ -992,12 +1053,32 @@ function buildChoicePools(facts) {
   return pools;
 }
 
+function extractMeasurementUnit(value) {
+  const match = String(value || "").match(
+    /\b(mm|cm|mL|mg|g|dB|Hz|kHz|years?|weeks?|months?|days?|hours?)\b/i
+  );
+  return match ? match[1].toLowerCase() : "";
+}
+
 function pickTypedDistractors(type, correctValue, neededCount = 3) {
   const sourcePool = Array.from(state.choicePools[type] || []);
   const normalizedCorrect = normalizeChoice(correctValue);
-  const candidates = sourcePool.filter(
+  let candidates = sourcePool.filter(
     (value) => normalizeChoice(value) !== normalizedCorrect
   );
+
+  if (type === "measurement") {
+    const correctUnit = extractMeasurementUnit(correctValue);
+    if (correctUnit) {
+      const sameUnitCandidates = candidates.filter(
+        (value) => extractMeasurementUnit(value) === correctUnit
+      );
+      if (sameUnitCandidates.length >= neededCount) {
+        candidates = sameUnitCandidates;
+      }
+    }
+  }
+
   return shuffle(candidates).slice(0, neededCount);
 }
 
@@ -1017,6 +1098,103 @@ function replaceRangeWithBlank(text, start, end) {
   return `${text.slice(0, start)}_____${text.slice(end)}`;
 }
 
+function expandTypedAnchorRange(definition, anchor) {
+  if (!definition || !anchor) {
+    return { start: 0, end: 0 };
+  }
+
+  let start = anchor.start;
+  let end = anchor.end;
+  if (!["measurement", "percentage", "count"].includes(anchor.type)) {
+    return { start, end };
+  }
+
+  const prefix = definition.slice(Math.max(0, anchor.start - 16), anchor.start);
+  const rangePrefixMatch = prefix.match(/(\d+(?:\.\d+)?)\s*[–-]\s*$/);
+  if (rangePrefixMatch) {
+    start = anchor.start - rangePrefixMatch[0].length;
+  }
+
+  return { start, end };
+}
+
+function findLeftBoundary(text, from, pattern) {
+  for (let index = from - 1; index >= 0; index -= 1) {
+    if (pattern.test(text[index])) {
+      return index + 1;
+    }
+  }
+  return 0;
+}
+
+function findRightBoundary(text, from, pattern) {
+  for (let index = from; index < text.length; index += 1) {
+    if (pattern.test(text[index])) {
+      return index;
+    }
+  }
+  return text.length;
+}
+
+function buildFocusedClozeDefinition(definition, anchor) {
+  const text = String(definition || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  const expanded = expandTypedAnchorRange(text, anchor);
+  let start = findLeftBoundary(text, expanded.start, /[.!?]/);
+  let end = findRightBoundary(text, expanded.end, /[.!?]/);
+
+  if (end - start < 48 || end - start > 220) {
+    start = findLeftBoundary(text, expanded.start, /[.;,:]/);
+    end = findRightBoundary(text, expanded.end, /[.;,:]/);
+  }
+
+  if (end - start < 36 || end - start > 240) {
+    const windowHalf = 105;
+    start = Math.max(0, expanded.start - windowHalf);
+    end = Math.min(text.length, expanded.end + windowHalf);
+
+    while (start > 0 && /\S/.test(text[start - 1])) {
+      start -= 1;
+    }
+    while (end < text.length && /\S/.test(text[end])) {
+      end += 1;
+    }
+  }
+
+  const relativeStart = Math.max(0, expanded.start - start);
+  const relativeEnd = Math.max(relativeStart + 1, expanded.end - start);
+  let cloze = replaceRangeWithBlank(text.slice(start, end), relativeStart, relativeEnd)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (start > 0) {
+    cloze = `... ${cloze}`;
+  }
+  if (end < text.length) {
+    cloze = `${cloze} ...`;
+  }
+
+  return cloze;
+}
+
+function isHighQualityTypedStem(stem) {
+  const text = String(stem || "").trim();
+  if (!text) {
+    return false;
+  }
+  const words = text.split(/\s+/);
+  if (words.length < 7 || words.length > 45) {
+    return false;
+  }
+  if ((text.match(/,/g) || []).length > 5 && !/[.;!?]/.test(text)) {
+    return false;
+  }
+  return true;
+}
+
 function buildTypedClozeQuestion(fact) {
   if (!hasExplanatoryVerb(fact.definition) && fact.definition.split(/\s+/).length < 8) {
     return null;
@@ -1029,7 +1207,10 @@ function buildTypedClozeQuestion(fact) {
       continue;
     }
 
-    const clozeDefinition = replaceRangeWithBlank(fact.definition, anchor.start, anchor.end);
+    const clozeDefinition = buildFocusedClozeDefinition(fact.definition, anchor);
+    if (!isHighQualityTypedStem(clozeDefinition)) {
+      continue;
+    }
     const options = shuffle([
       { value: anchor.value, correct: true },
       ...distractors.map((value) => ({ value, correct: false })),
@@ -1190,10 +1371,95 @@ function buildTermClozeQuestion(fact) {
   };
 }
 
+function buildDifferentiationQuestion(fact) {
+  if (!fact.siblingIds || fact.siblingIds.length < 3) {
+    return null;
+  }
+
+  const siblings = state.activeFacts.filter(f => fact.siblingIds.includes(f.id));
+  if (siblings.length < 3) {
+    return null;
+  }
+
+  const correctTerm = fact.term.trim();
+  if (!correctTerm || !hasExplanatoryVerb(fact.definition)) {
+    return null;
+  }
+
+  const selectedSiblings = shuffle(siblings).slice(0, 3);
+  const options = shuffle([
+    { value: correctTerm, correct: true },
+    ...selectedSiblings.map(s => ({ value: s.term.trim(), correct: false }))
+  ]);
+
+  if (options.length < 4) {
+    return null;
+  }
+
+  const contextLabel = buildFactContextLabel(fact);
+  return {
+    fact,
+    mode: "differentiation",
+    prompt: `Which sibling term matches this description${contextLabel ? ` in ${contextLabel}` : ""}?`,
+    detail: withQuestionContext(fact, trimForDisplay(fact.definition, 220), "Choose from the same section."),
+    options: options.slice(0, 4),
+  };
+}
+
+function buildAssociationQuestion(fact) {
+  if (!fact.parentSection) {
+    return null;
+  }
+
+  const definition = fact.definition.trim();
+  if (!definition || definition.length < 20) {
+    return null;
+  }
+
+  const parentConditions = state.activeFacts.filter(
+    f =>
+      f.id !== fact.id &&
+      f.parentSection === fact.parentSection &&
+      f.term.trim().length >= 3
+  );
+
+  if (parentConditions.length < 3) {
+    return null;
+  }
+
+  const selectedConditions = shuffle(parentConditions).slice(0, 3);
+  const options = shuffle([
+    { value: fact.term.trim(), correct: true },
+    ...selectedConditions.map(c => ({ value: c.term.trim(), correct: false }))
+  ]);
+
+  if (options.length < 4) {
+    return null;
+  }
+
+  const contextLabel = buildFactContextLabel(fact);
+  return {
+    fact,
+    mode: "association",
+    prompt: `This finding is associated with which condition${contextLabel ? ` in ${contextLabel}` : ""}?`,
+    detail: withQuestionContext(fact, trimForDisplay(definition, 220)),
+    options: options.slice(0, 4),
+  };
+}
+
 function buildQuestion(fact, mode) {
   if (mode === "cloze") {
     return buildTypedClozeQuestion(fact) || buildTermClozeQuestion(fact);
   }
+
+  if (mode === "differentiation") {
+    return buildDifferentiationQuestion(fact);
+  }
+
+  if (mode === "association") {
+    return buildAssociationQuestion(fact);
+  }
+
   if (mode === "definition-to-term" && isGenericHeadingTerm(fact.term)) {
     return null;
   }
@@ -1204,7 +1470,7 @@ function buildQuestion(fact, mode) {
       ? (otherFact) => otherFact.definition
       : (otherFact) => otherFact.term;
 
-  const pool = buildPeerPool(fact);
+  const pool = buildSmartPeerPool(fact);
 
   const options = [
     {
@@ -1251,7 +1517,7 @@ function buildQuestion(fact, mode) {
   const detail =
     mode === "term-to-definition"
       ? withQuestionContext(fact, "Choose the best matching definition.")
-      : withQuestionContext(fact, trimForDisplay(fact.definition, 280));
+      : withQuestionContext(fact, trimForDisplay(fact.definition, 220));
 
   return {
     fact,
@@ -1282,6 +1548,126 @@ function buildQuestionWithFallback(baseFact, mode) {
   return null;
 }
 
+function loadMissedFactIds() {
+  try {
+    const stored = localStorage.getItem("pasha-missed-facts");
+    if (stored) {
+      state.missedFactIds = JSON.parse(stored);
+    }
+  } catch (e) {
+    state.missedFactIds = [];
+  }
+  updateMissedCountLabel();
+}
+
+function saveMissedFactIds() {
+  try {
+    localStorage.setItem("pasha-missed-facts", JSON.stringify(state.missedFactIds));
+  } catch (e) {
+    // ignore localStorage errors
+  }
+  updateMissedCountLabel();
+}
+
+function updateMissedCountLabel() {
+  if (els.missedCountLabel) {
+    els.missedCountLabel.textContent = state.missedFactIds.length
+      ? `${state.missedFactIds.length} missed facts in storage`
+      : "No missed facts saved";
+  }
+}
+
+function selectFactsWithBias(candidates, missedIds, percentage = 30) {
+  const totalCount = candidates.length;
+  const missedCount = Math.ceil((totalCount * percentage) / 100);
+  const missed = candidates.filter(f => missedIds.includes(f.id));
+  const regular = candidates.filter(f => !missedIds.includes(f.id));
+
+  const selectedMissed = shuffle(missed).slice(0, missedCount);
+  const remaining = totalCount - selectedMissed.length;
+  const selectedRegular = shuffle(regular).slice(0, remaining);
+
+  return shuffle([...selectedMissed, ...selectedRegular]);
+}
+
+function selectByDifficulty(candidates, difficulty) {
+  if (difficulty === "easy") {
+    const high = candidates.filter(f => f.qualityTier === "high");
+    const medium = candidates.filter(f => f.qualityTier === "medium");
+    const easy70 = shuffle(high).slice(0, Math.ceil(candidates.length * 0.7));
+    const easy30 = shuffle(medium).slice(0, candidates.length - easy70.length);
+    return shuffle([...easy70, ...easy30]);
+  }
+
+  if (difficulty === "standard") {
+    const high = candidates.filter(f => f.qualityTier === "high");
+    const medium = candidates.filter(f => f.qualityTier === "medium");
+    const low = candidates.filter(f => f.qualityTier === "low");
+
+    const highCount = Math.ceil(candidates.length * 0.4);
+    const mediumCount = Math.ceil(candidates.length * 0.4);
+    const lowCount = candidates.length - highCount - mediumCount;
+
+    const selected = [
+      ...shuffle(high).slice(0, highCount),
+      ...shuffle(medium).slice(0, mediumCount),
+      ...shuffle(low).slice(0, lowCount),
+    ];
+    return shuffle(selected);
+  }
+
+  if (difficulty === "hard") {
+    return shuffle(candidates);
+  }
+
+  return shuffle(candidates);
+}
+
+function selectQuestionMode(difficulty) {
+  if (difficulty === "hard") {
+    const roll = Math.random();
+    if (roll < 0.6) {
+      return "differentiation";
+    } else if (roll < 0.75) {
+      return "cloze";
+    } else if (roll < 0.9) {
+      return "association";
+    } else {
+      return "term-to-definition";
+    }
+  }
+
+  if (els.modeSelect.value === "cloze") {
+    return "cloze";
+  }
+  if (els.modeSelect.value === "differentiation") {
+    return "differentiation";
+  }
+  if (els.modeSelect.value === "association") {
+    return "association";
+  }
+  if (els.modeSelect.value === "term-to-definition") {
+    return "term-to-definition";
+  }
+  if (els.modeSelect.value === "definition-to-term") {
+    return "definition-to-term";
+  }
+  if (els.modeSelect.value === "mixed-smart") {
+    const roll = Math.random();
+    if (roll < 0.4) {
+      return "cloze";
+    } else if (roll < 0.65) {
+      return "differentiation";
+    } else if (roll < 0.85) {
+      return "association";
+    } else {
+      return "term-to-definition";
+    }
+  }
+
+  return "cloze";
+}
+
 function renderQuestion() {
   state.answerLocked = false;
   state.pendingAdvance = "";
@@ -1297,17 +1683,8 @@ function renderQuestion() {
   if (canReuseKadooQuestion) {
     question = state.currentQuestion;
   } else {
-    let selectedMode = els.modeSelect.value;
-    if (selectedMode === "mixed") {
-      const roll = Math.random();
-      if (roll < 0.55) {
-        selectedMode = "cloze";
-      } else if (roll < 0.78) {
-        selectedMode = "term-to-definition";
-      } else {
-        selectedMode = "definition-to-term";
-      }
-    }
+    const difficulty = els.difficultySelect ? els.difficultySelect.value : "standard";
+    let selectedMode = selectQuestionMode(difficulty);
 
     question = buildQuestionWithFallback(fact, selectedMode);
   }
@@ -1322,6 +1699,9 @@ function renderQuestion() {
 
   els.feedback.textContent = "";
   els.feedback.className = "feedback";
+  if (els.feedbackDetail) {
+    els.feedbackDetail.innerHTML = "";
+  }
   els.nextBtn.hidden = true;
   els.options.innerHTML = "";
 
@@ -1349,6 +1729,44 @@ function renderQuestion() {
 
   updateHud();
   startTimer();
+}
+
+function renderFeedbackDetail(question, isCorrect) {
+  if (!els.feedbackDetail) {
+    return;
+  }
+
+  if (isCorrect) {
+    els.feedbackDetail.innerHTML = "";
+    return;
+  }
+
+  const fact = question.fact;
+  let html = "";
+
+  html += `<div style="margin-bottom: 12px; padding: 10px; background: #f5f5f5; border-radius: 4px;">`;
+  html += `<strong>${escapeHtml(fact.term)}</strong><br/>`;
+  html += `<em>${escapeHtml(trimForDisplay(fact.definition, 180))}</em>`;
+  html += `</div>`;
+
+  if (fact.siblingIds && fact.siblingIds.length > 0) {
+    const siblings = state.activeFacts.filter(f => fact.siblingIds.includes(f.id));
+    if (siblings.length > 0) {
+      const siblingsToShow = shuffle(siblings).slice(0, 3);
+      html += `<div style="font-size: 0.9em; color: #666;">`;
+      html += `<strong>Don't confuse with:</strong><br/>`;
+      html += siblingsToShow.map(s => `• ${escapeHtml(s.term)}`).join("<br/>");
+      html += `</div>`;
+    }
+  }
+
+  els.feedbackDetail.innerHTML = html;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function finalizeQuestion(selectedOption, isTimeout) {
@@ -1387,12 +1805,14 @@ function finalizeQuestion(selectedOption, isTimeout) {
         player.correct += 1;
         els.feedback.textContent = `${playerName}: Correct. +${points} points.`;
         els.feedback.className = "feedback correct";
+        renderFeedbackDetail(state.currentQuestion, true);
       } else {
         player.missed += 1;
         els.feedback.textContent = isTimeout
           ? `${playerName}: Time expired.`
           : `${playerName}: Incorrect.`;
         els.feedback.className = "feedback wrong";
+        renderFeedbackDetail(state.currentQuestion, false);
 
         state.missed.push({
           player: playerName,
@@ -1405,6 +1825,12 @@ function finalizeQuestion(selectedOption, isTimeout) {
           mode: state.currentQuestion.mode,
           sourceType: state.currentQuestion.fact.sourceType || "unknown",
         });
+
+        if (state.currentQuestion.fact.id) {
+          if (!state.missedFactIds.includes(state.currentQuestion.fact.id)) {
+            state.missedFactIds.push(state.currentQuestion.fact.id);
+          }
+        }
       }
     }
 
@@ -1434,6 +1860,7 @@ function finalizeQuestion(selectedOption, isTimeout) {
     state.score += points;
     els.feedback.textContent = `Correct. +${points} points`;
     els.feedback.className = "feedback correct";
+    renderFeedbackDetail(state.currentQuestion, true);
   } else {
     state.streak = 0;
 
@@ -1448,10 +1875,18 @@ function finalizeQuestion(selectedOption, isTimeout) {
       sourceType: state.currentQuestion.fact.sourceType || "unknown",
     });
 
+    if (state.currentQuestion.fact.id) {
+      if (!state.missedFactIds.includes(state.currentQuestion.fact.id)) {
+        state.missedFactIds.push(state.currentQuestion.fact.id);
+      }
+    }
+
     els.feedback.textContent = isTimeout ? "Time expired." : "Incorrect.";
     els.feedback.className = "feedback wrong";
+    renderFeedbackDetail(state.currentQuestion, false);
   }
 
+  saveMissedFactIds();
   updateHud();
   els.nextBtn.hidden = false;
   els.nextBtn.textContent =
@@ -1569,8 +2004,17 @@ function startRound() {
   state.choicePools = buildChoicePools(state.activeFacts);
 
   const requestedCount = Number(els.countSelect.value);
-  const roundSize = Math.min(requestedCount, state.activeFacts.length);
-  state.roundFacts = shuffle(state.activeFacts).slice(0, roundSize);
+  let selectedFacts = shuffle(state.activeFacts).slice(0, requestedCount);
+
+  const difficulty = els.difficultySelect ? els.difficultySelect.value : "standard";
+  selectedFacts = selectByDifficulty(selectedFacts, difficulty);
+
+  if (state.missedFactIds.length > 0) {
+    selectedFacts = selectFactsWithBias(selectedFacts, state.missedFactIds, 30);
+  }
+
+  const roundSize = Math.min(selectedFacts.length, state.activeFacts.length);
+  state.roundFacts = selectedFacts.slice(0, roundSize);
   state.index = 0;
   state.correct = 0;
   state.score = 0;
@@ -1687,6 +2131,7 @@ function init() {
   refreshSectionFacet(false);
   updateFilterMeta();
   syncKadooConfigVisibility();
+  loadMissedFactIds();
 }
 
 els.startBtn.addEventListener("click", startRound);
@@ -1698,6 +2143,13 @@ els.restartBtn.addEventListener("click", () => {
   showPanel("setup");
 });
 els.downloadMissedBtn.addEventListener("click", downloadMissedFacts);
+
+if (els.clearMissedBtn) {
+  els.clearMissedBtn.addEventListener("click", () => {
+    state.missedFactIds = [];
+    saveMissedFactIds();
+  });
+}
 
 els.topicList.addEventListener("change", () => {
   refreshSectionFacet(true);

@@ -536,3 +536,56 @@ button:disabled {
     width: auto;
   }
 }
+
+/* ── Feedback detail card (shows full fact on wrong answer) ─────────────── */
+.feedback-detail {
+  margin-top: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-radius: 0.75rem;
+  background: #f0f7f5;
+  border: 1px solid var(--line);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.feedback-detail .fact-term {
+  font-weight: 600;
+  color: #0e5a51;
+  margin-bottom: 0.35rem;
+}
+
+.feedback-detail .fact-definition {
+  color: var(--muted);
+}
+
+.feedback-detail .confuse-note {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.82rem;
+  color: #b45309;
+}
+
+/* ── Missed tracker in setup panel ──────────────────────────────────────── */
+.missed-tracker {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+/* ── Quality tier badges (optional, shown in question card) ─────────────── */
+.tier-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tier-badge.high { background: #d8efe8; color: #1f6b34; }
+.tier-badge.medium { background: #fef3c7; color: #92400e; }
+.tier-badge.low { background: #fee2e2; color: #991b1b; }

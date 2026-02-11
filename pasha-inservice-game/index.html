@@ -28,8 +28,10 @@
           <label class="field">
             <span>Question Mode</span>
             <select id="modeSelect">
-              <option value="cloze" selected>Cloze (Recommended)</option>
-              <option value="mixed">Mixed (Legacy)</option>
+              <option value="mixed-smart" selected>Smart Mix (Recommended)</option>
+              <option value="cloze">Cloze Fill-in</option>
+              <option value="differentiation">Differentiation</option>
+              <option value="association">Association</option>
               <option value="term-to-definition">Term to Definition</option>
               <option value="definition-to-term">Definition to Term</option>
             </select>
@@ -42,6 +44,15 @@
               <option value="25" selected>25 Questions</option>
               <option value="50">50 Questions</option>
               <option value="100">100 Questions</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Difficulty</span>
+            <select id="difficultySelect">
+              <option value="standard" selected>Standard</option>
+              <option value="easy">Easy (High-Yield Focus)</option>
+              <option value="hard">Hard (Differentiation Heavy)</option>
             </select>
           </label>
 
@@ -189,6 +200,12 @@
         </div>
 
         <p id="setupError" class="error" role="alert" aria-live="polite"></p>
+
+        <div id="missedTracker" class="missed-tracker">
+          <span id="missedCountLabel" class="muted"></span>
+          <button id="clearMissedBtn" class="ghost tiny" type="button" hidden>Clear History</button>
+        </div>
+
         <button id="startBtn" class="primary" type="button">Start Round</button>
       </section>
 
@@ -224,6 +241,7 @@
 
         <div id="options" class="options"></div>
         <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
+        <div id="feedbackDetail" class="feedback-detail" hidden></div>
         <button id="nextBtn" class="primary" type="button" hidden>Next Question</button>
       </section>
 
