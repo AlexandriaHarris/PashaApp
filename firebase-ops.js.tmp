@@ -1,0 +1,676 @@
+#!/usr/bin/env node
+/**
+ * Firebase Desktop Ops CLI
+ *
+ * Purpose:
+ * - check Firestore connectivity
+ * - summarize core collection sizes
+ * - list/export reports
+ * - repair malformed report documents
+ * - update report status/admin notes safely
+ *
+ * Usage:
+ *   node scripts/firebase-ops.js help
+ *   node scripts/firebase-ops.js check
+ *   node scripts/firebase-ops.js db:summary
+ *   node scripts/firebase-ops.js reports:list --all
+ *   node scripts/firebase-ops.js reports:summary
+ *   node scripts/firebase-ops.js reports:export --format=csv
+ *   node scripts/firebase-ops.js reports:repair            # dry-run
+ *   node scripts/firebase-ops.js reports:repair --apply
+ *   node scripts/firebase-ops.js reports:update --id=<docId> --status=resolved --admin-notes="fixed stem"
+ *   node scripts/firebase-ops.js reports:update --id=<docId> --status=resolved --apply
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
+
+const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'ent-practice-app';
+const ROOT_DIR = path.resolve(__dirname, '..');
+const REPORTS_COLLECTION = 'reports';
+const REPORT_OUTPUT_DIR = path.join(ROOT_DIR, 'scripts', 'reports');
+const VALID_REPORT_STATUSES = new Set(['pending', 'reviewed', 'resolved', 'dismissed']);
+
+function parseArgs(argv) {
+  const [command = 'help', ...rest] = argv;
+  const options = {};
+
+  for (let i = 0; i < rest.length; i += 1) {
+    const token = rest[i];
+    if (!token.startsWith('--')) {
+      if (!Array.isArray(options._)) options._ = [];
+      options._.push(token);
+      continue;
+    }
+
+    const raw = token.slice(2);
+    const eqIdx = raw.indexOf('=');
+    if (eqIdx >= 0) {
+      const key = raw.slice(0, eqIdx);
+      const value = raw.slice(eqIdx + 1);
+      options[key] = value;
+      continue;
+    }
+
+    const key = raw;
+    const next = rest[i + 1];
+    if (next && !next.startsWith('--')) {
+      options[key] = next;
+      i += 1;
+    } else {
+      options[key] = true;
+    }
+  }
+
+  return { command, options };
+}
+
+function printHelp() {
+  console.log(`
+Firebase Desktop Ops CLI
+
+Commands:
+  help
+    Show this help.
+
+  check
+    Verify Firestore connectivity for this desktop environment.
+
+  db:summary
+    Print collection counts for key collections.
+
+  reports:list [--status=pending] [--limit=200] [--all]
+    Print reports in a terminal table.
+
+  reports:summary [--status=pending]
+    Print report totals and breakdowns by status/type.
+
+  reports:export [--status=pending] [--format=csv|json] [--out=path]
+    Export reports (default format: csv) to scripts/reports/.
+
+  reports:repair [--status=pending] [--apply]
+    Find malformed reports and fix schema/status defaults.
+    Default is dry-run. Use --apply to write changes.
+
+  reports:update --id=<reportId> [--status=resolved] [--admin-notes="text"] [--reviewer=email] [--apply]
+    Update a single report safely. Default is dry-run.
+
+Examples:
+  npm run ops:check
+  npm run ops:db:summary
+  npm run ops:reports:list
+  npm run ops:reports:summary
+  npm run ops:reports:export
+  npm run ops:reports:repair
+  npm run ops:reports:repair:apply
+  node scripts/firebase-ops.js reports:update --id=abc123 --status=resolved --admin-notes="fixed" --apply
+`);
+}
+
+function ensureDir(dirPath) {
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function toInt(value, fallback) {
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function asString(value, fallback = '') {
+  if (value === null || value === undefined) return fallback;
+  return String(value);
+}
+
+function timestampToMillis(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.seconds === 'number') return value.seconds * 1000;
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  return 0;
+}
+
+function timestampToIso(value) {
+  const millis = timestampToMillis(value);
+  if (!millis) return '';
+  try {
+    return new Date(millis).toISOString();
+  } catch (error) {
+    return '';
+  }
+}
+
+function trimAndValidateStatus(status) {
+  const normalized = asString(status).trim().toLowerCase();
+  if (!normalized) return null;
+  if (!VALID_REPORT_STATUSES.has(normalized)) {
+    throw new Error(`Invalid status "${status}". Valid: ${Array.from(VALID_REPORT_STATUSES).join(', ')}`);
+  }
+  return normalized;
+}
+
+function truncate(str, max = 48) {
+  const value = asString(str);
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function padRight(str, width) {
+  const value = asString(str);
+  if (value.length >= width) return value;
+  return `${value}${' '.repeat(width - value.length)}`;
+}
+
+function toCsvValue(value) {
+  const text = asString(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function nowStampForFile() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+function detectCredentialInfo() {
+  const envPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (envPath && fs.existsSync(envPath)) {
+    return { mode: 'service-account-env', path: envPath };
+  }
+
+  const localServiceAccountPath = path.join(ROOT_DIR, 'serviceAccountKey.json');
+  if (fs.existsSync(localServiceAccountPath)) {
+    return { mode: 'service-account-file', path: localServiceAccountPath };
+  }
+
+  return { mode: 'application-default', path: null };
+}
+
+function initFirestore() {
+  const credentialInfo = detectCredentialInfo();
+  let app;
+
+  if (credentialInfo.mode === 'service-account-file') {
+    const serviceAccount = JSON.parse(fs.readFileSync(credentialInfo.path, 'utf8'));
+    app = initializeApp({
+      credential: cert(serviceAccount),
+      projectId: serviceAccount.project_id || PROJECT_ID,
+    });
+  } else {
+    // Uses GOOGLE_APPLICATION_CREDENTIALS (if set) or gcloud/ADC credentials.
+    app = initializeApp({ projectId: PROJECT_ID });
+  }
+
+  const db = getFirestore(app);
+  return { db, credentialInfo };
+}
+
+async function getCollectionCount(db, collectionName) {
+  try {
+    const aggregate = await db.collection(collectionName).count().get();
+    return aggregate.data().count;
+  } catch (error) {
+    const snapshot = await db.collection(collectionName).get();
+    return snapshot.size;
+  }
+}
+
+function normalizeReportSnapshot(docSnap) {
+  const data = docSnap.data() || {};
+  const createdAtMs = timestampToMillis(data.createdAt || data.timestamp);
+  const updatedAtMs = timestampToMillis(data.updatedAt || data.createdAt || data.timestamp);
+  const rawStatus = asString(data.status || 'pending').trim().toLowerCase();
+  const status = VALID_REPORT_STATUSES.has(rawStatus) ? rawStatus : 'pending';
+
+  return {
+    id: docSnap.id,
+    cloudId: docSnap.id,
+    type: asString(data.type || 'unknown'),
+    itemId: asString(data.itemId || ''),
+    itemTitle: asString(data.itemTitle || ''),
+    status,
+    description: asString(data.description || ''),
+    userId: asString(data.userId || 'anonymous'),
+    userEmail: asString(data.userEmail || 'anonymous'),
+    adminNotes: asString(data.adminNotes || ''),
+    createdAt: timestampToIso(data.createdAt || data.timestamp),
+    updatedAt: timestampToIso(data.updatedAt || data.createdAt || data.timestamp),
+    createdAtMs,
+    updatedAtMs,
+    timestamp: data.timestamp || null,
+    raw: data,
+  };
+}
+
+async function fetchReportDocs(db, { status = null } = {}) {
+  let queryRef = db.collection(REPORTS_COLLECTION);
+  if (status) {
+    queryRef = queryRef.where('status', '==', status);
+  }
+  const snapshot = await queryRef.get();
+  return snapshot.docs;
+}
+
+async function fetchReports(db, { status = null, limit = 200, all = false } = {}) {
+  const statusFilter = status ? trimAndValidateStatus(status) : null;
+  let queryRef = db.collection(REPORTS_COLLECTION);
+  if (statusFilter) queryRef = queryRef.where('status', '==', statusFilter);
+
+  // Attempt ordered query first, then fallback if index/order constraints exist.
+  try {
+    let orderedQuery = queryRef.orderBy('createdAt', 'desc');
+    if (!all && limit > 0) orderedQuery = orderedQuery.limit(limit);
+    const snapshot = await orderedQuery.get();
+    return snapshot.docs.map(normalizeReportSnapshot);
+  } catch (error) {
+    let fallbackQuery = queryRef;
+    if (!all && limit > 0) fallbackQuery = fallbackQuery.limit(limit);
+    const snapshot = await fallbackQuery.get();
+    const reports = snapshot.docs.map(normalizeReportSnapshot);
+    reports.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
+    return reports;
+  }
+}
+
+function printReportTable(reports) {
+  const rows = reports.map((r) => ({
+    id: truncate(r.id, 16),
+    status: r.status,
+    type: truncate(r.type, 12),
+    itemId: truncate(r.itemId, 18),
+    userEmail: truncate(r.userEmail, 28),
+    createdAt: truncate(r.createdAt || '', 19),
+  }));
+
+  const columns = [
+    { key: 'id', label: 'ID', width: 16 },
+    { key: 'status', label: 'STATUS', width: 10 },
+    { key: 'type', label: 'TYPE', width: 12 },
+    { key: 'itemId', label: 'ITEM', width: 18 },
+    { key: 'userEmail', label: 'USER', width: 28 },
+    { key: 'createdAt', label: 'CREATED', width: 19 },
+  ];
+
+  const header = columns.map((col) => padRight(col.label, col.width)).join('  ');
+  const divider = columns.map((col) => '-'.repeat(col.width)).join('  ');
+  console.log(header);
+  console.log(divider);
+  rows.forEach((row) => {
+    const line = columns.map((col) => padRight(row[col.key], col.width)).join('  ');
+    console.log(line);
+  });
+}
+
+async function cmdCheck(db, credentialInfo) {
+  console.log('Firebase Desktop Check');
+  console.log(`- Project ID: ${PROJECT_ID}`);
+  console.log(`- Credential mode: ${credentialInfo.mode}`);
+  if (credentialInfo.path) {
+    console.log(`- Credential path: ${credentialInfo.path}`);
+  }
+
+  const checks = ['questions', 'flashcards', 'readings', 'users', 'reports'];
+  for (const name of checks) {
+    // Read one doc to verify auth + connectivity.
+    await db.collection(name).limit(1).get();
+  }
+
+  console.log('Connection OK: Firestore read checks passed.');
+}
+
+async function cmdDbSummary(db) {
+  const collections = [
+    'questions',
+    'flashcards',
+    'readings',
+    'users',
+    'reports',
+    'assignments',
+    'questionStats',
+  ];
+
+  console.log('Firestore Collection Summary');
+  for (const name of collections) {
+    const count = await getCollectionCount(db, name);
+    console.log(`- ${padRight(name, 14)} ${count}`);
+  }
+}
+
+async function cmdReportsList(db, options) {
+  const status = options.status ? trimAndValidateStatus(options.status) : null;
+  const all = Boolean(options.all);
+  const limit = all ? 0 : toInt(options.limit, 200);
+  const reports = await fetchReports(db, { status, limit, all });
+
+  console.log(`Reports fetched: ${reports.length}`);
+  if (reports.length === 0) return;
+
+  printReportTable(reports);
+}
+
+function summarizeReports(reports) {
+  const byStatus = {};
+  const byType = {};
+  const byUser = {};
+
+  let oldestOpenMs = 0;
+  let openCount = 0;
+
+  reports.forEach((report) => {
+    byStatus[report.status] = (byStatus[report.status] || 0) + 1;
+    byType[report.type] = (byType[report.type] || 0) + 1;
+    byUser[report.userEmail] = (byUser[report.userEmail] || 0) + 1;
+
+    const isOpen = report.status !== 'resolved' && report.status !== 'dismissed';
+    if (isOpen) {
+      openCount += 1;
+      if (!oldestOpenMs || (report.createdAtMs && report.createdAtMs < oldestOpenMs)) {
+        oldestOpenMs = report.createdAtMs;
+      }
+    }
+  });
+
+  return { byStatus, byType, byUser, openCount, oldestOpenMs };
+}
+
+function printCountMap(title, mapObject, maxRows = 10) {
+  const entries = Object.entries(mapObject).sort((a, b) => b[1] - a[1]);
+  console.log(title);
+  if (entries.length === 0) {
+    console.log('- none');
+    return;
+  }
+  entries.slice(0, maxRows).forEach(([name, count]) => {
+    console.log(`- ${padRight(name, 28)} ${count}`);
+  });
+  if (entries.length > maxRows) {
+    console.log(`- ... (${entries.length - maxRows} more)`);
+  }
+}
+
+async function cmdReportsSummary(db, options) {
+  const status = options.status ? trimAndValidateStatus(options.status) : null;
+  const reports = await fetchReports(db, { status, all: true });
+  const summary = summarizeReports(reports);
+
+  console.log(`Total reports: ${reports.length}`);
+  console.log(`Open reports: ${summary.openCount}`);
+  if (summary.oldestOpenMs) {
+    console.log(`Oldest open report: ${new Date(summary.oldestOpenMs).toISOString()}`);
+  }
+
+  printCountMap('\nBy status:', summary.byStatus, 8);
+  printCountMap('\nBy type:', summary.byType, 12);
+  printCountMap('\nTop reporters:', summary.byUser, 12);
+}
+
+function buildReportExportRows(reports) {
+  return reports.map((report) => ({
+    id: report.id,
+    type: report.type,
+    itemId: report.itemId,
+    itemTitle: report.itemTitle,
+    status: report.status,
+    userId: report.userId,
+    userEmail: report.userEmail,
+    createdAt: report.createdAt,
+    updatedAt: report.updatedAt,
+    description: report.description,
+    adminNotes: report.adminNotes,
+  }));
+}
+
+async function cmdReportsExport(db, options) {
+  const status = options.status ? trimAndValidateStatus(options.status) : null;
+  const format = asString(options.format || (options.json ? 'json' : 'csv')).toLowerCase();
+  if (format !== 'json' && format !== 'csv') {
+    throw new Error(`Invalid format "${format}". Use csv or json.`);
+  }
+
+  const reports = await fetchReports(db, { status, all: true });
+  const rows = buildReportExportRows(reports);
+  ensureDir(REPORT_OUTPUT_DIR);
+
+  const outPath = options.out
+    ? path.resolve(ROOT_DIR, asString(options.out))
+    : path.join(
+      REPORT_OUTPUT_DIR,
+      `reports_${status || 'all'}_${nowStampForFile()}.${format}`
+    );
+
+  if (format === 'json') {
+    fs.writeFileSync(outPath, JSON.stringify(rows, null, 2));
+  } else {
+    const headers = [
+      'id',
+      'type',
+      'itemId',
+      'itemTitle',
+      'status',
+      'userId',
+      'userEmail',
+      'createdAt',
+      'updatedAt',
+      'description',
+      'adminNotes',
+    ];
+    const lines = [headers.join(',')];
+    rows.forEach((row) => {
+      lines.push(headers.map((h) => toCsvValue(row[h])).join(','));
+    });
+    fs.writeFileSync(outPath, lines.join('\n'));
+  }
+
+  console.log(`Exported ${rows.length} reports -> ${outPath}`);
+}
+
+function buildRepairPatch(data) {
+  const patch = {};
+
+  const normalizedStatus = asString(data.status || '').trim().toLowerCase();
+  if (!VALID_REPORT_STATUSES.has(normalizedStatus)) {
+    patch.status = 'pending';
+  } else if (normalizedStatus !== data.status) {
+    patch.status = normalizedStatus;
+  }
+
+  const stringFields = [
+    ['type', 'unknown'],
+    ['itemId', ''],
+    ['itemTitle', ''],
+    ['description', ''],
+    ['userId', 'anonymous'],
+    ['userEmail', 'anonymous'],
+    ['adminNotes', ''],
+  ];
+
+  stringFields.forEach(([field, fallback]) => {
+    const value = data[field];
+    if (value === undefined || value === null || String(value).trim() === '') {
+      patch[field] = fallback;
+      return;
+    }
+    if (typeof value !== 'string') {
+      patch[field] = String(value);
+    }
+  });
+
+  if (!data.createdAt) {
+    const tsMillis = timestampToMillis(data.timestamp);
+    if (tsMillis > 0) {
+      patch.createdAt = Timestamp.fromMillis(tsMillis);
+    } else if (data.updatedAt && typeof data.updatedAt.toMillis === 'function') {
+      patch.createdAt = data.updatedAt;
+    } else {
+      patch.createdAt = FieldValue.serverTimestamp();
+    }
+  }
+
+  return patch;
+}
+
+function previewPatch(patch) {
+  const preview = {};
+  Object.entries(patch).forEach(([key, value]) => {
+    if (value && typeof value.toDate === 'function') {
+      preview[key] = value.toDate().toISOString();
+      return;
+    }
+    if (key === 'createdAt' || key === 'updatedAt') {
+      const millis = timestampToMillis(value);
+      preview[key] = millis ? new Date(millis).toISOString() : '__SERVER_TIMESTAMP__';
+      return;
+    }
+    preview[key] = value;
+  });
+  return preview;
+}
+
+async function cmdReportsRepair(db, options) {
+  const status = options.status ? trimAndValidateStatus(options.status) : null;
+  const apply = Boolean(options.apply);
+  const docs = await fetchReportDocs(db, { status });
+
+  const pendingUpdates = [];
+  const fieldFixCounts = {};
+
+  docs.forEach((docSnap) => {
+    const data = docSnap.data() || {};
+    const patch = buildRepairPatch(data);
+    if (Object.keys(patch).length === 0) return;
+
+    patch.updatedAt = FieldValue.serverTimestamp();
+    Object.keys(patch).forEach((field) => {
+      fieldFixCounts[field] = (fieldFixCounts[field] || 0) + 1;
+    });
+
+    pendingUpdates.push({
+      id: docSnap.id,
+      ref: docSnap.ref,
+      patch,
+      preview: previewPatch(patch),
+    });
+  });
+
+  console.log(`Reports scanned: ${docs.length}`);
+  console.log(`Reports needing repair: ${pendingUpdates.length}`);
+  if (pendingUpdates.length === 0) return;
+
+  printCountMap('\nFields to repair:', fieldFixCounts, 20);
+  console.log('\nSample repair actions:');
+  pendingUpdates.slice(0, 12).forEach((item) => {
+    console.log(`- ${item.id}: ${JSON.stringify(item.preview)}`);
+  });
+
+  if (!apply) {
+    console.log('\nDry-run only. Re-run with --apply to write fixes.');
+    return;
+  }
+
+  const batchSize = 350;
+  for (let i = 0; i < pendingUpdates.length; i += batchSize) {
+    const slice = pendingUpdates.slice(i, i + batchSize);
+    const batch = db.batch();
+    slice.forEach((item) => batch.update(item.ref, item.patch));
+    await batch.commit();
+    console.log(`Applied batch ${Math.floor(i / batchSize) + 1}: ${slice.length} updates`);
+  }
+
+  console.log(`Repair complete. Updated ${pendingUpdates.length} report documents.`);
+}
+
+async function cmdReportsUpdate(db, options) {
+  const reportId = asString(options.id || (Array.isArray(options._) ? options._[0] : ''), '').trim();
+  if (!reportId) {
+    throw new Error('reports:update requires --id=<reportId>');
+  }
+
+  const apply = Boolean(options.apply);
+  const patch = {};
+
+  if (options.status !== undefined) {
+    patch.status = trimAndValidateStatus(options.status);
+  }
+  if (options['admin-notes'] !== undefined) {
+    patch.adminNotes = asString(options['admin-notes']);
+  }
+  if (options.reviewer !== undefined) {
+    patch.reviewedBy = asString(options.reviewer);
+  }
+
+  if (Object.keys(patch).length === 0) {
+    throw new Error('No update fields provided. Use --status and/or --admin-notes.');
+  }
+
+  if (patch.status && ['reviewed', 'resolved', 'dismissed'].includes(patch.status)) {
+    patch.reviewedAt = FieldValue.serverTimestamp();
+    if (!patch.reviewedBy) {
+      patch.reviewedBy = asString(process.env.USER || 'terminal-admin');
+    }
+  }
+
+  patch.updatedAt = FieldValue.serverTimestamp();
+  const docRef = db.collection(REPORTS_COLLECTION).doc(reportId);
+  const snap = await docRef.get();
+  if (!snap.exists) {
+    throw new Error(`Report "${reportId}" not found.`);
+  }
+
+  if (!apply) {
+    console.log('Dry-run report update (no write).');
+    console.log(`- Report ID: ${reportId}`);
+    console.log(`- Patch: ${JSON.stringify(previewPatch(patch), null, 2)}`);
+    console.log('Re-run with --apply to commit.');
+    return;
+  }
+
+  await docRef.update(patch);
+  console.log(`Updated report ${reportId}.`);
+}
+
+async function run() {
+  const { command, options } = parseArgs(process.argv.slice(2));
+  if (command === 'help' || command === '--help' || command === '-h') {
+    printHelp();
+    return;
+  }
+
+  const { db, credentialInfo } = initFirestore();
+
+  switch (command) {
+    case 'check':
+      await cmdCheck(db, credentialInfo);
+      return;
+    case 'db:summary':
+      await cmdDbSummary(db);
+      return;
+    case 'reports:list':
+      await cmdReportsList(db, options);
+      return;
+    case 'reports:summary':
+      await cmdReportsSummary(db, options);
+      return;
+    case 'reports:export':
+      await cmdReportsExport(db, options);
+      return;
+    case 'reports:repair':
+      await cmdReportsRepair(db, options);
+      return;
+    case 'reports:update':
+      await cmdReportsUpdate(db, options);
+      return;
+    default:
+      throw new Error(`Unknown command "${command}". Run: node scripts/firebase-ops.js help`);
+  }
+}
+
+run().catch((error) => {
+  console.error(`Error: ${error.message}`);
+  process.exitCode = 1;
+});

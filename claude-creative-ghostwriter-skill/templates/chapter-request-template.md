@@ -1,14 +1,23 @@
 # Chapter Request
 
 - `chapter_number`:
+- `task_chapter_index`: 1 | 2 | 3
+- `task_window_target`: 2
 - `genre_context`:
 - `goal_for_chapter`:
 - `must_include`:
 - `must_avoid`:
 - `point_of_view`:
+- `active_primary_characters`:
+- `active_secondary_characters`:
 - `quality_mode`: scene
 - `target_length`: 1800-2500
+- `quality_gate_threshold`: 80
 - `style_intent_for_chapter`:
 - `allowed_style_deviation`:
+- `novelty_target`:
+- `banned_rehash_elements`:
+- `intentional_echoes`:
+- `relevant_notes`: [[outline]], [[character_bible]], [[style_guide]], [[knowledge_map]], [[novelty_ledger]], [[chapter_memory_log]], [[timeline]]
 - `continuity_focus`:
 - `chapter_exit_state`:

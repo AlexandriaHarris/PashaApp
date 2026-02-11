@@ -49,3 +49,4 @@
 
 - `positive_anchor_notes`:
 - `negative_anchor_notes`:
+- `related_notes`: [[style_guide]], [[themes]], [[character_bible]]

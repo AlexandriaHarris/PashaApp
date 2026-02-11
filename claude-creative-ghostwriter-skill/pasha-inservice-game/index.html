@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pasha Inservice Arena</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="glow glow-one"></div>
+    <div class="glow glow-two"></div>
+    <main class="app-shell">
+      <header class="hero">
+        <p class="badge">Otolaryngology Inservice Review</p>
+        <h1>Pasha Inservice Arena</h1>
+        <p class="subtitle">
+          Adaptive rapid-fire quiz game generated from your Pasha text extracts.
+        </p>
+      </header>
+
+      <section id="setupPanel" class="panel">
+        <div class="panel-head">
+          <h2>Build Your Round</h2>
+          <p id="bankMeta" class="muted"></p>
+        </div>
+
+        <div class="controls">
+          <label class="field">
+            <span>Question Mode</span>
+            <select id="modeSelect">
+              <option value="mixed-smart" selected>Smart Mix (Recommended)</option>
+              <option value="cloze">Cloze Fill-in</option>
+              <option value="differentiation">Differentiation</option>
+              <option value="association">Association</option>
+              <option value="term-to-definition">Term to Definition</option>
+              <option value="definition-to-term">Definition to Term</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Round Size</span>
+            <select id="countSelect">
+              <option value="10">10 Questions</option>
+              <option value="25" selected>25 Questions</option>
+              <option value="50">50 Questions</option>
+              <option value="100">100 Questions</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Difficulty</span>
+            <select id="difficultySelect">
+              <option value="standard" selected>Standard</option>
+              <option value="easy">Easy (High-Yield Focus)</option>
+              <option value="hard">Hard (Differentiation Heavy)</option>
+            </select>
+          </label>
+
+          <label class="field checkbox-field">
+            <input id="timedToggle" type="checkbox" />
+            <span>Timed Mode (25 seconds per question)</span>
+          </label>
+
+          <label class="field checkbox-field">
+            <input id="kadooToggle" type="checkbox" />
+            <span>Kadoo Mode (Multiplayer Timed Turns)</span>
+          </label>
+
+          <label class="field checkbox-field">
+            <input id="includeProseToggle" type="checkbox" checked />
+            <span>Include Relevant Prose Facts</span>
+          </label>
+        </div>
+
+        <div id="kadooConfig" class="controls" hidden>
+          <label class="field">
+            <span>Player Names (comma separated)</span>
+            <input
+              id="kadooPlayersInput"
+              type="text"
+              placeholder="Alex, Sam, Jordan"
+            />
+          </label>
+
+          <label class="field">
+            <span>Turn Timer</span>
+            <select id="kadooSecondsSelect">
+              <option value="10">10 seconds</option>
+              <option value="15">15 seconds</option>
+              <option value="20" selected>20 seconds</option>
+              <option value="25">25 seconds</option>
+              <option value="30">30 seconds</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="filter-stack">
+          <label class="field">
+            <span>Keyword Filter (optional)</span>
+            <input
+              id="keywordFilter"
+              type="text"
+              placeholder="thyroid, papillary carcinoma, cholesteatoma..."
+            />
+          </label>
+
+          <p id="filterMeta" class="muted"></p>
+
+          <div class="filter-grid">
+            <section class="facet-card">
+              <div class="topic-header">
+                <h3>Topic</h3>
+                <div class="topic-actions">
+                  <button type="button" class="ghost tiny" data-facet-target="topicList" data-facet-mode="all">
+                    All
+                  </button>
+                  <button type="button" class="ghost tiny" data-facet-target="topicList" data-facet-mode="none">
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div id="topicList" class="facet-grid"></div>
+            </section>
+
+            <section class="facet-card">
+              <div class="topic-header">
+                <h3>Chapter</h3>
+                <div class="topic-actions">
+                  <button type="button" class="ghost tiny" data-facet-target="chapterList" data-facet-mode="all">
+                    All
+                  </button>
+                  <button type="button" class="ghost tiny" data-facet-target="chapterList" data-facet-mode="none">
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div id="chapterList" class="facet-grid"></div>
+            </section>
+
+            <section class="facet-card">
+              <div class="topic-header">
+                <h3>Section</h3>
+                <div class="topic-actions">
+                  <button type="button" class="ghost tiny" data-facet-target="sectionList" data-facet-mode="all">
+                    All
+                  </button>
+                  <button type="button" class="ghost tiny" data-facet-target="sectionList" data-facet-mode="none">
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div id="sectionList" class="facet-grid"></div>
+            </section>
+
+            <section class="facet-card">
+              <div class="topic-header">
+                <h3>Organ System</h3>
+                <div class="topic-actions">
+                  <button type="button" class="ghost tiny" data-facet-target="organSystemList" data-facet-mode="all">
+                    All
+                  </button>
+                  <button type="button" class="ghost tiny" data-facet-target="organSystemList" data-facet-mode="none">
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div id="organSystemList" class="facet-grid"></div>
+            </section>
+
+            <section class="facet-card">
+              <div class="topic-header">
+                <h3>Disease Domain</h3>
+                <div class="topic-actions">
+                  <button type="button" class="ghost tiny" data-facet-target="diseaseDomainList" data-facet-mode="all">
+                    All
+                  </button>
+                  <button type="button" class="ghost tiny" data-facet-target="diseaseDomainList" data-facet-mode="none">
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div id="diseaseDomainList" class="facet-grid"></div>
+            </section>
+
+            <section class="facet-card">
+              <div class="topic-header">
+                <h3>Focus Area</h3>
+                <div class="topic-actions">
+                  <button type="button" class="ghost tiny" data-facet-target="focusAreaList" data-facet-mode="all">
+                    All
+                  </button>
+                  <button type="button" class="ghost tiny" data-facet-target="focusAreaList" data-facet-mode="none">
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div id="focusAreaList" class="facet-grid"></div>
+            </section>
+          </div>
+        </div>
+
+        <p id="setupError" class="error" role="alert" aria-live="polite"></p>
+
+        <div class="progress-dashboard">
+          <h3>Your Progress</h3>
+          <div id="progressBar" class="progress-bar">
+            <div id="progressBarFill" class="progress-bar-fill"></div>
+          </div>
+          <p id="progressStatsLabel" class="muted"></p>
+          <div class="progress-actions">
+            <button id="exportProgressBtn" class="ghost tiny" type="button">Export Progress</button>
+            <button id="importProgressBtn" class="ghost tiny" type="button">Import Progress</button>
+            <input id="importProgressFile" type="file" accept=".json" hidden />
+          </div>
+        </div>
+
+        <label class="field checkbox-field">
+          <input id="priorityModeToggle" type="checkbox" checked />
+          <span>Priority Mode (unseen &amp; struggling facts first)</span>
+        </label>
+
+        <div id="missedTracker" class="missed-tracker">
+          <span id="missedCountLabel" class="muted"></span>
+          <button id="clearMissedBtn" class="ghost tiny" type="button" hidden>Clear History</button>
+        </div>
+
+        <button id="startBtn" class="primary" type="button">Start Round</button>
+      </section>
+
+      <section id="gamePanel" class="panel" hidden>
+        <div class="hud">
+          <div id="progressLabel" class="chip"></div>
+          <div id="scoreLabel" class="chip"></div>
+          <div id="streakLabel" class="chip"></div>
+          <div id="timerLabel" class="chip timer" hidden></div>
+        </div>
+
+        <article class="question-card">
+          <p id="questionTopic" class="topic-tag"></p>
+          <h2 id="questionPrompt"></h2>
+          <p id="questionDetail" class="detail"></p>
+        </article>
+        <section id="kadooPanel" class="kadoo-panel" hidden>
+          <p id="kadooTurnLabel" class="kadoo-turn"></p>
+          <div id="kadooScoreboard" class="kadoo-scoreboard"></div>
+        </section>
+        <div class="question-actions">
+          <a
+            id="openEvidenceLink"
+            class="ghost link-btn"
+            href="https://www.openevidence.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Open In OpenEvidence
+          </a>
+          <p id="openEvidenceStatus" class="muted evidence-status" aria-live="polite"></p>
+        </div>
+
+        <div id="options" class="options"></div>
+        <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
+        <div id="feedbackDetail" class="feedback-detail" hidden></div>
+        <button id="nextBtn" class="primary" type="button" hidden>Next Question</button>
+      </section>
+
+      <section id="resultsPanel" class="panel" hidden>
+        <h2>Round Complete</h2>
+        <p id="resultsSummary" class="summary"></p>
+        <section id="leaderboardWrap" class="leaderboard-wrap" hidden>
+          <h3>Kadoo Leaderboard</h3>
+          <div id="resultsLeaderboard" class="kadoo-scoreboard"></div>
+        </section>
+        <div class="results-actions">
+          <button id="downloadMissedBtn" class="ghost" type="button">
+            Download Missed Facts
+          </button>
+          <button id="exportProgressBtn2" class="ghost" type="button">
+            Save Progress File
+          </button>
+          <button id="restartBtn" class="primary" type="button">Play Another Round</button>
+        </div>
+        <div id="missedList" class="missed-list"></div>
+      </section>
+    </main>
+    <script src="data/pasha-question-bank.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

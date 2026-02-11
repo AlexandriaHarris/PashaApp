@@ -15,3 +15,14 @@ Track notable objects, tools, and their narrative constraints.
 ## Known Unknowns
 
 ## Chapter-Relevant Hooks
+
+## Linked Notes
+
+- [[outline]]
+- [[character_bible]]
+- [[world_overview]]
+- [[themes]]
+- [[style_guide]]
+- [[timeline]]
+- [[canon_changelog]]
+- [[novelty_ledger]]

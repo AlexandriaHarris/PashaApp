@@ -1,4 +1,4 @@
 interface:
   display_name: "Claude Creative Ghostwriter"
-  short_description: "Worldbuilding-first fiction drafting with continuity QA"
-  default_prompt: "Use $claude-creative-ghostwriter to set up my story bible in initial_setup mode and draft chapter 1 with continuity QA."
+  short_description: "Canon-safe fiction drafting with novelty and anti-AI gating"
+  default_prompt: "Use $claude-creative-ghostwriter to build my story bible, run chapter 1 with novelty planning, and enforce the quality gate before final output."

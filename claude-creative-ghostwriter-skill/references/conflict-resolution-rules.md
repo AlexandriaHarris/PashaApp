@@ -29,3 +29,21 @@ Do not rewrite source canon files without explicit user instruction. Use append-
 ## Rule 6: Re-check After Decision
 
 After user selects resolution, rerun continuity check on impacted passages before finalizing output.
+
+## Rule 7: Handle Rehash Risk Explicitly
+
+When rehash risk is detected:
+- option A: revise now for novelty
+- option B: keep as intentional echo with rationale
+- option C: defer and propose alternate novelty vectors
+
+Log approved intentional echoes and banned repeat elements in `novelty_ledger.md`.
+
+## Rule 8: Resolve Knowledge and Inventory Conflicts
+
+When knowledge or inventory continuity conflicts are detected:
+- option A: revise chapter events to match existing `knowledge_map.md`
+- option B: update `knowledge_map.md` with evidence-backed chapter change
+- option C: mark uncertain and ask a targeted follow-up question
+
+Always keep active-character updates ordered as primary first, secondary second.

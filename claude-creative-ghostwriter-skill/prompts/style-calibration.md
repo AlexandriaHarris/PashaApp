@@ -25,6 +25,11 @@ Convert user literary intent into enforceable style rules that survive long proj
   - allowed variation ranges
   - anti-patterns to avoid
   - chapter-level deviation policy
+  - novelty controls (what should vary versus what should remain stable)
+  - rehash guardrails (banned phrase habits, overused imagery families, stale scene-open patterns)
+  - AI-tell blacklist (stock phrases, cliche families, repetitive sentence openers, exposition habits, dialogue flatteners)
+  - Obsidian `[[wikilink]]` references to related canon notes
+- Keep default blacklist values active unless user replaces them with project-specific alternatives.
 
 3. Align runtime controls
 - Translate contract into voice profile and prose slider defaults.
